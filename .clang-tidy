@@ -1,0 +1,17 @@
+# Conservative check set: real bugs and correctness issues, not style
+# opinions clang-format already enforces. Never applied to external/ (see
+# HeaderFilterRegex below) -- we don't lint code we didn't write.
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  readability-*,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -bugprone-easily-swappable-parameters
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '^(src|tools|tests)/'
+FormatStyle: none

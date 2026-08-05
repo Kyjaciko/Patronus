@@ -1,0 +1,5 @@
+# Google C++ style as the base; see docs/STYLE.md for the handful of
+# deliberate deviations (e.g. .cpp instead of .cc) and their rationale.
+BasedOnStyle: Google
+
+ColumnLimit: 120

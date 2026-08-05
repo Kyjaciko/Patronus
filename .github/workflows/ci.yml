@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - preset: debug
+            configuration: Debug
+          - preset: release
+            configuration: Release
+          - preset: relwithdebinfo
+            configuration: RelWithDebInfo
+    steps:
+      - uses: actions/checkout@v4
+
+      # One shared configure per job; each matrix leg only builds its own
+      # configuration out of the multi-config Visual Studio generator.
+      - name: Configure
+        run: cmake --preset windows
+
+      - name: Build (${{ matrix.configuration }})
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      # WARP fallback in the smoke test (see src/rhi/smoketest/main.cpp)
+      # makes this safe to run on GitHub's GPU-less Windows runners.
+      - name: Run smoke test
+        shell: pwsh
+        run: |
+          & "build/${{ matrix.configuration }}/PatronusSmokeTest.exe"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Smoke test exited with code $LASTEXITCODE"
+          }
+
+  format-check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: clang-format --dry-run
+        shell: pwsh
+        run: |
+          # windows-latest normally has LLVM on PATH, but fall back to the
+          # copy bundled with the VS2022 C++ workload in case it doesn't --
+          # confirmed by hand that VS ships its own clang-format that isn't
+          # always on PATH.
+          $clangFormat = (Get-Command clang-format -ErrorAction SilentlyContinue).Source
+          if (-not $clangFormat) {
+            $clangFormat = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\x64\bin\clang-format.exe"
+            if (-not (Test-Path $clangFormat)) {
+              throw "clang-format not found on PATH or in the expected VS2022 LLVM location."
+            }
+          }
+          Write-Host "Using $clangFormat"
+          & $clangFormat --version
+
+          $files = Get-ChildItem -Recurse -Include *.cpp, *.h, *.hpp -Path src, tools, tests, benchmarks -ErrorAction SilentlyContinue
+          if (-not $files) {
+            Write-Host "No source files to format-check yet."
+            exit 0
+          }
+
+          $failed = $false
+          foreach ($f in $files) {
+            & $clangFormat --dry-run --Werror $f.FullName
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "::error file=$($f.FullName)::not clang-format clean"
+              $failed = $true
+            }
+          }
+          if ($failed) {
+            throw "One or more files are not clang-format clean."
+          }
