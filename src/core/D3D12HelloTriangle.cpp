@@ -2,7 +2,7 @@
 #include "D3D12HelloTriangle.h"
 
 extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 618; }
-extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = u8".\\D3D12\\"; }
+extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\"; }
 
 D3D12HelloTriangle::D3D12HelloTriangle(UINT width, UINT height, std::wstring name) :
   DXSample(width, height, name),
@@ -319,8 +319,8 @@ void D3D12HelloTriangle::WaitForPreviousFrame()
   // Wait until the previous frame is finished.
   if (m_fence->GetCompletedValue() < fence)
   {
-      ThrowIfFailed(m_fence->SetEventOnCompletion(fence, m_fenceEvent));
-      WaitForSingleObject(m_fenceEvent, INFINITE);
+    ThrowIfFailed(m_fence->SetEventOnCompletion(fence, m_fenceEvent));
+    WaitForSingleObject(m_fenceEvent, INFINITE);
   }
 
   m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();

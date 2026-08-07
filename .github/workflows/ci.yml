@@ -7,7 +7,11 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    # Pinned to windows-2022 (not windows-latest): as of June 2026,
+    # windows-latest points at Windows Server 2025 + Visual Studio 2026,
+    # which doesn't have the "Visual Studio 17 2022" generator this project
+    # targets. Pinning also keeps CI on the same toolchain as local dev.
+    runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
@@ -40,7 +44,10 @@ jobs:
           }
 
   format-check:
-    runs-on: windows-latest
+    # Same windows-2022 pin as the build job -- keeps clang-format on this
+    # runner at the version this project's formatting was actually verified
+    # against (see CompilerWarnings comment in the build job above).
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
