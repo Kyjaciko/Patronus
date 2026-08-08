@@ -26,11 +26,19 @@ FetchContent_Declare(
 # explicit commit instead of a moving branch ref -- otherwise every clean
 # configure could silently pull in different ImGui code. Bump this SHA
 # deliberately when you want to update.
+#
+# GIT_SHALLOW is deliberately FALSE here, unlike the other two deps: a
+# shallow fetch of a raw commit SHA (rather than a tag/branch ref) is a
+# fragile pattern in general -- the docking branch moves fast and Dear
+# ImGui is known to occasionally rewrite its history, so a shallow fetch
+# of a specific SHA is more likely to fail as that SHA ages. A full clone
+# is slightly slower but doesn't depend on the remote's shallow-fetch
+# support for an unadvertised commit.
 FetchContent_Declare(
   imgui
   GIT_REPOSITORY https://github.com/ocornut/imgui.git
   GIT_TAG        035c87ef847e5b6188713a6009f383f633b6043d # docking branch HEAD, pinned 2026-08-05
-  GIT_SHALLOW    TRUE
+  GIT_SHALLOW    FALSE
 )
 
 FetchContent_MakeAvailable(tracy d3d12ma)

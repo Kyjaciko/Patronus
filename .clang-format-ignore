@@ -1,0 +1,7 @@
+# Vendored Microsoft sample code (D3D12HelloTriangle, copied from
+# DirectX-Graphics-Samples into src/core/ for learning purposes). Claude
+# does not reformat or otherwise modify code matching the CLAUDE.md hard
+# rule (renderer core / swapchain / command lists / PSOs / etc.), regardless
+# of which folder it lives in -- same reasoning external/ is excluded from
+# linting.
+src/core/*

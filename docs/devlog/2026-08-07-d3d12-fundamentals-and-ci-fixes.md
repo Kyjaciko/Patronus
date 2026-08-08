@@ -237,3 +237,61 @@ failures, both root-caused before fixing (not guessed):
    changed which `clang-format` was first on `PATH`, disagreeing with the
    VS2022-bundled 19.1.5 the source files were formatted against. Resolved
    as a side effect of the `windows-2022` pin above.
+
+A later push turned up a third issue: pinning Dear ImGui's docking branch to
+a raw commit SHA with `GIT_SHALLOW TRUE` is a fragile combination — the
+docking branch moves fast (rewritten/rebased occasionally), so a shallow
+fetch of a specific, unadvertised SHA is more likely to fail as that commit
+ages. Switched to `GIT_SHALLOW FALSE` for imgui specifically (full clone,
+still checks out the exact pinned SHA) in `cmake/Dependencies.cmake`.
+
+## Building the HelloTriangle sample
+
+Getting the vendored sample to actually compile needed three CMake-side
+fixes, all in `CMakeLists.txt` — none of them touch the sample's own code:
+
+- **MSVC conformance mode.** The project sets `CMAKE_CXX_EXTENSIONS OFF`
+  globally, and VS2022's toolset defaults `ConformanceMode` (`/permissive-`)
+  to on regardless. Both together rejected the sample's
+  `&CD3DX12_HEAP_PROPERTIES(...)`-style address-of-a-temporary pattern — a
+  long-standing MSVC extension the sample was written against. Fixed with
+  `target_compile_options(D3D12HelloTriangle PRIVATE /permissive)` on that
+  target only.
+- **Duplicate Agility SDK export.** `D3D12HelloTriangle.cpp` already embeds
+  its own `D3D12SDKVersion`/`D3D12SDKPath` exports (that's how Microsoft
+  ships this particular sample) — linking `src/rhi/AgilitySDKExports.cpp`
+  into the same target as well was a duplicate-symbol link error. Fixed by
+  not linking it there.
+- **`d3dx12.h` resolution.** `stdafx.h` does
+  `#include "include/d3dx12/d3dx12.h"` (relative, literal `include/`
+  prefix). Adding the parent of the fetched Agility SDK's include dir
+  (`.../build/native`, one level above where `d3dx12.h` actually lives) to
+  the target's include path makes that resolve without touching the
+  sample.
+
+It compiles and links cleanly in all three configurations now. Shaders are
+compiled from `shaders.hlsl` at build time via the DXC already fetched for
+the project, targeting `vs_5_1`/`ps_5_1` — matching this sample's
+`ReadDataFromFile`-based design (classic pre-DXC pattern: precompiled
+bytecode, not compiled at runtime), rather than the project's general SM
+6.6 policy. Worth noting: this particular DXC version silently promotes any
+requested profile below 6.0 up to 6.0 (visible as a
+"Promoting older shader model profile" build warning), so it's still
+emitting DXIL either way.
+
+**Status: builds, does not yet run successfully.** The compiled exe
+launches a window but crashes immediately with an unhandled C++ exception
+(`0xE06D7363`, i.e. a genuine `throw`, confirmed via a small custom Win32
+debugger rather than assumed) from somewhere inside `LoadPipeline()` /
+`LoadAssets()` — almost certainly one of the `ThrowIfFailed(...)` calls.
+Ruled out so far, each with an actual before/after test, not just theory:
+the two build-side issues above (both real bugs, now fixed, but neither was
+the cause of this crash); a missing `dxil.dll` DXIL validator (deployed it
+both next to the exe and inside the `D3D12/` subfolder next to
+`D3D12Core.dll` — identical crash either way). Pinning the exact failing
+`ThrowIfFailed` call needs an interactive debugger with proper stack
+unwinding (Visual Studio, already installed, is the fastest path — open the
+project and F5 it) rather than more guessing on my end. Since this is
+vendored sample code under the CLAUDE.md hard rule, the actual fix (once
+identified) needs to happen on the CMake/environment side, not by editing
+`D3D12HelloTriangle.cpp`.
