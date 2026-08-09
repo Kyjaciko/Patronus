@@ -64,22 +64,25 @@ target_link_libraries(PatronusSmokeTest PRIVATE
 patronus_deploy_agility_sdk(PatronusSmokeTest)
 
 # --- D3D12HelloTriangle -------------------------------------------------
-# Microsoft's sample from DirectX-Graphics-Samples, copied verbatim into
-# src/core/ by the user for learning purposes -- not written or modified by
-# Claude (CLAUDE.md hard rule). Everything below is build plumbing only:
-# compiling the existing, untouched sources and shader.
+# Microsoft's sample from DirectX-Graphics-Samples, copied into src/core/ by
+# the user for learning purposes -- not written or modified by Claude
+# (CLAUDE.md hard rule). Everything below is build plumbing only.
 #
-# Note: D3D12HelloTriangle.cpp already embeds its own D3D12SDKVersion /
-# D3D12SDKPath exports (that's how Microsoft ships this sample) -- do NOT
-# also link src/rhi/AgilitySDKExports.cpp here, that's a duplicate-symbol
-# link error. patronus_deploy_agility_sdk() below still applies; it only
-# copies DLLs and doesn't care which .cpp exported the version symbols.
+# Agility SDK opt-in: the sample as Microsoft ships it embeds its own
+# D3D12SDKVersion / D3D12SDKPath exports hardcoded to the version that
+# sample was written against (618), which does not track the version this
+# project fetches and deploys. A mismatch is a hard runtime failure --
+# D3D12CreateDevice returns 0x887E0003 D3D12_ERROR_INVALID_REDIST -- so the
+# sample's copy was removed and it links the project's single definition in
+# src/rhi/AgilitySDKExports.cpp instead (619), same as PatronusSmokeTest --
+# one export, matching the one version FetchAgilitySDK.cmake deploys.
 add_executable(D3D12HelloTriangle WIN32
   src/core/main.cpp
   src/core/stdafx.cpp
   src/core/DXSample.cpp
   src/core/Win32Application.cpp
   src/core/D3D12HelloTriangle.cpp
+  src/rhi/AgilitySDKExports.cpp
 )
 
 # VS2022's toolset defaults ConformanceMode (/permissive-) to on when a
