@@ -1,9 +1,6 @@
 #include "stdafx.h"
 #include "D3D12HelloTriangle.h"
 
-extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 618; }
-extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\"; }
-
 D3D12HelloTriangle::D3D12HelloTriangle(UINT width, UINT height, std::wstring name) :
   DXSample(width, height, name),
   m_frameIndex(0),
@@ -40,29 +37,29 @@ void D3D12HelloTriangle::LoadPipeline()
 #endif
 
   ComPtr<IDXGIFactory4> factory;
-  ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
+  COM_ERROR_IF_FAILED(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)), "Failed to create DXGI factory.");
 
   if (m_useWarpDevice)
   {
     ComPtr<IDXGIAdapter> warpAdapter;
-    ThrowIfFailed(factory->EnumWarpAdapter(IID_PPV_ARGS(&warpAdapter)));
+    COM_ERROR_IF_FAILED(factory->EnumWarpAdapter(IID_PPV_ARGS(&warpAdapter)), "Failed to enumerate through the adapters.");
 
-    ThrowIfFailed(D3D12CreateDevice(
+    COM_ERROR_IF_FAILED(D3D12CreateDevice(
       warpAdapter.Get(),
       D3D_FEATURE_LEVEL_11_0,
       IID_PPV_ARGS(&m_device)
-      ));
+      ), "Failed to create the device.");
   }
   else
   {
     ComPtr<IDXGIAdapter1> hardwareAdapter;
     GetHardwareAdapter(factory.Get(), &hardwareAdapter);
 
-    ThrowIfFailed(D3D12CreateDevice(
+    COM_ERROR_IF_FAILED(D3D12CreateDevice(
       hardwareAdapter.Get(),
       D3D_FEATURE_LEVEL_11_0,
       IID_PPV_ARGS(&m_device)
-      ));
+      ), "Failed to create the device.");
   }
 
   // Describe and create the command queue.
@@ -70,7 +67,7 @@ void D3D12HelloTriangle::LoadPipeline()
   queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
   queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 
-  ThrowIfFailed(m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue)));
+  COM_ERROR_IF_FAILED(m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue)), "Failed to create the command queue.");
 
   // Describe and create the swap chain.
   DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
@@ -83,19 +80,19 @@ void D3D12HelloTriangle::LoadPipeline()
   swapChainDesc.SampleDesc.Count = 1;
 
   ComPtr<IDXGISwapChain1> swapChain;
-  ThrowIfFailed(factory->CreateSwapChainForHwnd(
+  COM_ERROR_IF_FAILED(factory->CreateSwapChainForHwnd(
     m_commandQueue.Get(),        // Swap chain needs the queue so that it can force a flush on it.
     Win32Application::GetHwnd(),
     &swapChainDesc,
     nullptr,
     nullptr,
     &swapChain
-    ));
+    ), "Failed to create the swap chain.");
 
   // This sample does not support fullscreen transitions.
-  ThrowIfFailed(factory->MakeWindowAssociation(Win32Application::GetHwnd(), DXGI_MWA_NO_ALT_ENTER));
+  COM_ERROR_IF_FAILED(factory->MakeWindowAssociation(Win32Application::GetHwnd(), DXGI_MWA_NO_ALT_ENTER), "Failed to disable support for fullscreen.");
 
-  ThrowIfFailed(swapChain.As(&m_swapChain));
+  COM_ERROR_IF_FAILED(swapChain.As(&m_swapChain), "Failed to obtain the DXGI swap chain.");
   m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 
   // Create descriptor heaps.
@@ -105,7 +102,7 @@ void D3D12HelloTriangle::LoadPipeline()
     rtvHeapDesc.NumDescriptors = FrameCount;
     rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
     rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-    ThrowIfFailed(m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap)));
+    COM_ERROR_IF_FAILED(m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap)), "Failed to create the descriptor heap.");
 
     m_rtvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
   }
@@ -117,13 +114,13 @@ void D3D12HelloTriangle::LoadPipeline()
     // Create a RTV for each frame.
     for (UINT n = 0; n < FrameCount; n++)
     {
-      ThrowIfFailed(m_swapChain->GetBuffer(n, IID_PPV_ARGS(&m_renderTargets[n])));
+      COM_ERROR_IF_FAILED(m_swapChain->GetBuffer(n, IID_PPV_ARGS(&m_renderTargets[n])), "Failed to obtain the swap chain back buffer.");
       m_device->CreateRenderTargetView(m_renderTargets[n].Get(), nullptr, rtvHandle);
       rtvHandle.Offset(1, m_rtvDescriptorSize);
     }
   }
 
-  ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)));
+  COM_ERROR_IF_FAILED(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)), "Failed to create a command allocator");
 }
 
 // Load the sample assets.
@@ -136,8 +133,8 @@ void D3D12HelloTriangle::LoadAssets()
 
     ComPtr<ID3DBlob> signature;
     ComPtr<ID3DBlob> error;
-    ThrowIfFailed(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error));
-    ThrowIfFailed(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)));
+    COM_ERROR_IF_FAILED(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error), "Failed to serialize the root signature.");
+    COM_ERROR_IF_FAILED(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)), "Failed to create the root signature.");
   }
 
   // Create the pipeline state, which includes compiling and loading shaders.
@@ -147,8 +144,8 @@ void D3D12HelloTriangle::LoadAssets()
     UINT vertexShaderDataLength = 0;
     UINT pixelShaderDataLength = 0;
 
-    ThrowIfFailed(ReadDataFromFile(GetAssetFullPath(L"shaders_VSMain.cso").c_str(), &pVertexShaderData, &vertexShaderDataLength));
-    ThrowIfFailed(ReadDataFromFile(GetAssetFullPath(L"shaders_PSMain.cso").c_str(), &pPixelShaderData, &pixelShaderDataLength));
+    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"shaders_VSMain.cso").c_str(), &pVertexShaderData, &vertexShaderDataLength), "Failed to read the vertex shader.");
+    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"shaders_PSMain.cso").c_str(), &pPixelShaderData, &pixelShaderDataLength), "Failed to read the pixel shader.");
 
     // Define the vertex input layout.
     D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
@@ -172,15 +169,15 @@ void D3D12HelloTriangle::LoadAssets()
     psoDesc.NumRenderTargets = 1;
     psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
     psoDesc.SampleDesc.Count = 1;
-    ThrowIfFailed(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)));
+    COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)), "Failed to create the graphics pipeline state.");
   }
 
   // Create the command list.
-  ThrowIfFailed(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator.Get(), m_pipelineState.Get(), IID_PPV_ARGS(&m_commandList)));
+  COM_ERROR_IF_FAILED(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator.Get(), m_pipelineState.Get(), IID_PPV_ARGS(&m_commandList)), "Failed to create the command list.");
 
   // Command lists are created in the recording state, but there is nothing
   // to record yet. The main loop expects it to be closed, so close it now.
-  ThrowIfFailed(m_commandList->Close());
+  COM_ERROR_IF_FAILED(m_commandList->Close(), "Failed to close the command list.");
 
   // Create the vertex buffer.
   {
@@ -198,18 +195,18 @@ void D3D12HelloTriangle::LoadAssets()
     // recommended. Every time the GPU needs it, the upload heap will be marshalled 
     // over. Please read up on Default Heap usage. An upload heap is used here for 
     // code simplicity and because there are very few verts to actually transfer.
-    ThrowIfFailed(m_device->CreateCommittedResource(
+    COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
       &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
       D3D12_HEAP_FLAG_NONE,
       &CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize),
       D3D12_RESOURCE_STATE_GENERIC_READ,
       nullptr,
-      IID_PPV_ARGS(&m_vertexBuffer)));
+      IID_PPV_ARGS(&m_vertexBuffer)), "Failed to create the vertex buffer.");
 
     // Copy the triangle data to the vertex buffer.
     UINT8* pVertexDataBegin;
     CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
-    ThrowIfFailed(m_vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin)));
+    COM_ERROR_IF_FAILED(m_vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin)), "Failed to map the vertex buffer.");
     memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices));
     m_vertexBuffer->Unmap(0, nullptr);
 
@@ -221,14 +218,14 @@ void D3D12HelloTriangle::LoadAssets()
 
   // Create synchronization objects and wait until assets have been uploaded to the GPU.
   {
-    ThrowIfFailed(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
+    COM_ERROR_IF_FAILED(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)), "Failed to create the fence.");
     m_fenceValue = 1;
 
     // Create an event handle to use for frame synchronization.
     m_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
     if (m_fenceEvent == nullptr)
     {
-      ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+      COM_ERROR_IF_FAILED(HRESULT_FROM_WIN32(GetLastError()), "Failed to create the fence event.");
     }
 
     // Wait for the command list to execute; we are reusing the same command 
@@ -254,7 +251,7 @@ void D3D12HelloTriangle::OnRender()
   m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
   // Present the frame.
-  ThrowIfFailed(m_swapChain->Present(1, 0));
+  COM_ERROR_IF_FAILED(m_swapChain->Present(1, 0), "Failed to present the frame.");
 
   WaitForPreviousFrame();
 }
@@ -273,12 +270,12 @@ void D3D12HelloTriangle::PopulateCommandList()
   // Command list allocators can only be reset when the associated 
   // command lists have finished execution on the GPU; apps should use 
   // fences to determine GPU execution progress.
-  ThrowIfFailed(m_commandAllocator->Reset());
+  COM_ERROR_IF_FAILED(m_commandAllocator->Reset(), "Failed to reset the command allocator.");
 
   // However, when ExecuteCommandList() is called on a particular command 
   // list, that command list can then be reset at any time and must be before 
   // re-recording.
-  ThrowIfFailed(m_commandList->Reset(m_commandAllocator.Get(), m_pipelineState.Get()));
+  COM_ERROR_IF_FAILED(m_commandList->Reset(m_commandAllocator.Get(), m_pipelineState.Get()), "Failed to reset the command list.");
 
   // Set necessary state.
   m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
@@ -301,7 +298,7 @@ void D3D12HelloTriangle::PopulateCommandList()
   // Indicate that the back buffer will now be used to present.
   m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
 
-  ThrowIfFailed(m_commandList->Close());
+  COM_ERROR_IF_FAILED(m_commandList->Close(), "Failed to close the command list.");
 }
 
 void D3D12HelloTriangle::WaitForPreviousFrame()
@@ -313,13 +310,13 @@ void D3D12HelloTriangle::WaitForPreviousFrame()
 
   // Signal and increment the fence value.
   const UINT64 fence = m_fenceValue;
-  ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), fence));
+  COM_ERROR_IF_FAILED(m_commandQueue->Signal(m_fence.Get(), fence), "Failed to signal the fence.");
   m_fenceValue++;
 
   // Wait until the previous frame is finished.
   if (m_fence->GetCompletedValue() < fence)
   {
-    ThrowIfFailed(m_fence->SetEventOnCompletion(fence, m_fenceEvent));
+    COM_ERROR_IF_FAILED(m_fence->SetEventOnCompletion(fence, m_fenceEvent), "Failed to set the fence completion event.");
     WaitForSingleObject(m_fenceEvent, INFINITE);
   }
 

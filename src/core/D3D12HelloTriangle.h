@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DXSample.h"
+#include "COMException.h"
 
 using namespace DirectX;
 

@@ -1,5 +1,6 @@
 #pragma once
 #include <stdexcept>
+#include "COMException.h"
 
 // Note that while ComPtr is used to manage the lifetime of resources on the CPU,
 // it has no understanding of the lifetime of resources on the GPU. Apps must account
@@ -25,13 +26,13 @@ private:
 
 #define SAFE_RELEASE(p) if (p) (p)->Release()
 
-inline void ThrowIfFailed(HRESULT hr)
+/*inline void ThrowIfFailed(HRESULT hr)
 {
   if (FAILED(hr))
   {
     throw HrException(hr);
   }
-}
+}*/
 
 inline void GetAssetsPath(_Out_writes_(pathSize) WCHAR* path, UINT pathSize)
 {
@@ -214,7 +215,8 @@ inline Microsoft::WRL::ComPtr<ID3DBlob> CompileShader(
   {
     OutputDebugStringA((char*)errors->GetBufferPointer());
   }
-  ThrowIfFailed(hr);
+  //ThrowIfFailed(hr);
+  COM_ERROR_IF_FAILED(hr, "Failed to compile shader.");
 
   return byteCode;
 }
