@@ -102,7 +102,7 @@ void D3D12HelloTriangle::LoadPipeline()
     .AlphaMode = DXGI_ALPHA_MODE_IGNORE, // OS Window ignores alpha channel (not the pipeline!)
     .Flags = 
         DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT
-      | DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING // Enable VRR
+      | DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING // Required for VRR (not yet used)
   };
 
   ComPtr<IDXGISwapChain1> swapChain;
@@ -121,7 +121,7 @@ void D3D12HelloTriangle::LoadPipeline()
   COM_ERROR_IF_FAILED(factory->MakeWindowAssociation(Win32Application::GetHwnd(), DXGI_MWA_NO_ALT_ENTER), "Failed to disable support for fullscreen.");
 
   COM_ERROR_IF_FAILED(swapChain.As(&m_swapChain), "Failed to obtain the DXGI swap chain.");
-  m_swapChain->SetMaximumFrameLatency(kFramesInFlight); // Set maximum number of back buffer frames that will be queued 
+  m_swapChain->SetMaximumFrameLatency(kFramesInFlight); // Set maximum number of Present() calls that will be queued.
   m_frameLatencyWaitable = m_swapChain->GetFrameLatencyWaitableObject();
 
   // Create descriptor heaps.
@@ -151,9 +151,16 @@ void D3D12HelloTriangle::LoadPipeline()
     }
   }
 
-  for (UINT n = 0; n < kFramesInFlight; ++n)
+  // Create command allocators.
+  //
+  // One allocator per frame in flight: while the GPU executes frame N's
+  // commands, the CPU records frame N+1 into the other one. An allocator
+  // may only be reset once its fence has passed.
   {
-    COM_ERROR_IF_FAILED(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[n])), "Failed to create a command allocator");
+    for (UINT n = 0; n < kFramesInFlight; ++n)
+    {
+      COM_ERROR_IF_FAILED(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[n])), "Failed to create a command allocator");
+    }
   }
 }
 
@@ -264,9 +271,6 @@ void D3D12HelloTriangle::LoadAssets()
       COM_ERROR_IF_FAILED(HRESULT_FROM_WIN32(GetLastError()), "Failed to create the fence event.");
     }
 
-    // Wait for the command list to execute; we are reusing the same command 
-    // list in our main loop but for now, we just want to wait for setup to 
-    // complete before continuing.
     WaitForGpu();
   }
 }
@@ -306,14 +310,8 @@ void D3D12HelloTriangle::OnDestroy()
 
 void D3D12HelloTriangle::PopulateCommandList()
 {
-  // Command list allocators can only be reset when the associated 
-  // command lists have finished execution on the GPU; apps should use 
-  // fences to determine GPU execution progress.
+  // Safe here because BeginFrame() waited on m_fenceValues[m_frameIndex].
   COM_ERROR_IF_FAILED(m_commandAllocators[m_frameIndex]->Reset(), "Failed to reset the command allocator.");
-
-  // However, when ExecuteCommandList() is called on a particular command 
-  // list, that command list can then be reset at any time and must be before 
-  // re-recording.
   COM_ERROR_IF_FAILED(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), m_pipelineState.Get()), "Failed to reset the command list.");
 
   // Set necessary state.
@@ -340,30 +338,9 @@ void D3D12HelloTriangle::PopulateCommandList()
   COM_ERROR_IF_FAILED(m_commandList->Close(), "Failed to close the command list.");
 }
 
-/*void D3D12HelloTriangle::WaitForPreviousFrame()
-{
-  // WAITING FOR THE FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
-  // This is code implemented as such for simplicity. The D3D12HelloFrameBuffering
-  // sample illustrates how to use fences for efficient resource usage and to
-  // maximize GPU utilization.
-
-  // Signal and increment the fence value.
-  const UINT64 fence = m_fenceValue;
-  COM_ERROR_IF_FAILED(m_commandQueue->Signal(m_fence.Get(), fence), "Failed to signal the fence.");
-  m_fenceValue++;
-
-  // Wait until the previous frame is finished.
-  if (m_fence->GetCompletedValue() < fence)
-  {
-    COM_ERROR_IF_FAILED(m_fence->SetEventOnCompletion(fence, m_fenceEvent), "Failed to set the fence completion event.");
-    WaitForSingleObject(m_fenceEvent, INFINITE);
-  }
-
-  m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
-}*/
-
 void D3D12HelloTriangle::WaitForGpu()
 {
+  // Place a signal at the back of the queue to know everything is completed.
   const UINT64 value = ++m_nextFenceValue;
   COM_ERROR_IF_FAILED(m_commandQueue->Signal(m_fence.Get(), value), "Failed to signal command queue fence.");
   if (m_fence->GetCompletedValue() < value)
@@ -375,10 +352,10 @@ void D3D12HelloTriangle::WaitForGpu()
 
 void D3D12HelloTriangle::BeginFrame()
 {
-  // Wait until the fence has been processed (present-latency).
+  // Wait until a new frame can be queued (no more than kFramesInFlight amount of Present() calls can be in DXGI's present-queue).
   WaitForSingleObjectEx(m_frameLatencyWaitable, INFINITE, FALSE);
 
-  // GPU ready with this frame index?
+  // Has the GPU finished the work previously submitted (in this slot)?
   if (m_fence->GetCompletedValue() < m_fenceValues[m_frameIndex])
   {
     COM_ERROR_IF_FAILED(m_fence->SetEventOnCompletion(m_fenceValues[m_frameIndex], m_fenceEvent), "Failed to set fence completion event.");
@@ -404,10 +381,10 @@ void D3D12HelloTriangle::BeginFrame()
 
 void D3D12HelloTriangle::EndFrame()
 {
-  // Increment the fence value for the current frame.
+  // Claim the next fence value.
   m_fenceValues[m_frameIndex] = ++m_nextFenceValue;
 
-  // Schedule a Signal command in the queue.
+  // The GPU writes the new fence value once all commands submitted before this point have completed.
   COM_ERROR_IF_FAILED(m_commandQueue->Signal(m_fence.Get(), m_fenceValues[m_frameIndex]), "Failed to signal command queue fence.");
 
   m_frameIndex = (m_frameIndex + 1) % kFramesInFlight;

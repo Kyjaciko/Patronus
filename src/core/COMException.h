@@ -39,7 +39,6 @@ private:
 
 }
 
-// 'do { ... } while(0)' is needed to avoid 'dangling else'.
 #define COM_ERROR_IF_FAILED(hr, msg) do { \
   if (FAILED(hr)) \
   { \
@@ -48,4 +47,4 @@ private:
     MessageBoxW(nullptr, error_message.c_str(), L"Error", MB_ICONERROR); \
     exit(-1); \
   } \
-} while(0)
+} while(0) // 'do { ... } while(0)' is needed to avoid 'dangling else'.

@@ -23,7 +23,14 @@ public:
   void OnDestroy() override;
 
 private:
-  //static constexpr UINT FrameCount = 2;
+  // Two independent numbers, deliberately not shared:
+  //
+  // kBufferCount    — swapchain surfaces. One is on screen, one is queued for
+  //                   the next flip, one is free to render into. Three keeps
+  //                   Present from blocking when a frame runs long.
+  // kFramesInFlight — how far the CPU may run ahead of the GPU. Bounds input
+  //                   latency and sizes the per-frame resources (command
+  //                   allocators, fence values). Nothing to do with surfaces.
   static constexpr UINT kBufferCount = 3;
   static constexpr UINT kFramesInFlight = 2;
 
@@ -58,12 +65,11 @@ private:
   HANDLE m_fenceEvent;
   HANDLE m_frameLatencyWaitable;
   ComPtr<ID3D12Fence> m_fence;
-  UINT64 m_fenceValues[kFramesInFlight]; //   Sequence: { 2, 3 }, { 4, 5 }, { 6, 7 }, ...
+  UINT64 m_fenceValues[kFramesInFlight];
 
   void LoadPipeline();
   void LoadAssets();
   void PopulateCommandList();
-  //void WaitForPreviousFrame();
   void WaitForGpu();
   void BeginFrame();
   void EndFrame();
