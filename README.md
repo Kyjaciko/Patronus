@@ -13,6 +13,13 @@ Windows, MSVC, C++20, HLSL Shader Model 6.6.
 Early scaffolding. No rendering yet — see `docs/devlog/` for progress notes
 and `docs/adr/` for the architectural decisions behind the current setup.
 
+## Implemented
+
+Frame synchronisation: separate backbuffer and frames-in-flight counts,
+each with its own index, and a two-point wait (frame latency waitable,
+then per-slot fence) before a command allocator is reset. See
+[ADR-0002](docs/adr/0002-frames-in-flight.md).
+
 ## Building
 
 Requires Visual Studio 2022 (with the Desktop C++ workload) and CMake 3.28+.
