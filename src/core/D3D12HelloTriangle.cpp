@@ -11,7 +11,9 @@ D3D12HelloTriangle::D3D12HelloTriangle(UINT width, UINT height, std::wstring nam
   m_nextFenceValue(0),
   m_fenceEvent(nullptr),
   m_frameLatencyWaitable(nullptr),
-  m_fenceValues{}
+  m_fenceValues{},
+  m_windowVisible(true),
+  m_windowedMode(true)
 {
 }
 
@@ -41,7 +43,7 @@ void D3D12HelloTriangle::LoadPipeline()
   }
 #endif
 
-  ComPtr<IDXGIFactory4> factory;
+  ComPtr<IDXGIFactory5> factory;
   COM_ERROR_IF_FAILED(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)), "Failed to create DXGI factory.");
 
   if (m_useWarpDevice)
@@ -88,6 +90,8 @@ void D3D12HelloTriangle::LoadPipeline()
 
   COM_ERROR_IF_FAILED(m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue)), "Failed to create the command queue.");
 
+  COM_ERROR_IF_FAILED(factory->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &m_tearingSupport, sizeof(m_tearingSupport)), "Failed to check for hardware feature support.");
+
   // Describe and create the swap chain.
   DXGI_SWAP_CHAIN_DESC1 swapChainDesc {
     .Width = m_width, 
@@ -97,12 +101,12 @@ void D3D12HelloTriangle::LoadPipeline()
     .SampleDesc = { .Count = 1, .Quality = 0 }, // MSAA turned OFF; flip models don't support this!
     .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
     .BufferCount = kBufferCount,
-    .Scaling = DXGI_SCALING_STRETCH,
+    .Scaling = DXGI_SCALING_NONE, // Disabled streching to test if window resizing works properly.
     .SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
     .AlphaMode = DXGI_ALPHA_MODE_IGNORE, // OS Window ignores alpha channel (not the pipeline!)
     .Flags = 
         DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT
-      | DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING // Required for VRR (not yet used)
+      | (m_tearingSupport ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0u) // Required for VRR (not yet used)
   };
 
   ComPtr<IDXGISwapChain1> swapChain;
@@ -117,8 +121,12 @@ void D3D12HelloTriangle::LoadPipeline()
     "Failed to create the swap chain."
   );
 
-  // This sample does not support fullscreen transitions.
-  COM_ERROR_IF_FAILED(factory->MakeWindowAssociation(Win32Application::GetHwnd(), DXGI_MWA_NO_ALT_ENTER), "Failed to disable support for fullscreen.");
+  // When tearing support is enabled our application will explicitly handle 
+  // the fullscreen/windowed transitions instead of letting DXGI handle this automatically.
+  if (m_tearingSupport) 
+  {
+    COM_ERROR_IF_FAILED(factory->MakeWindowAssociation(Win32Application::GetHwnd(), DXGI_MWA_NO_ALT_ENTER), "Failed to diasble DXGI automatic fullscreen handling.");
+  }
 
   COM_ERROR_IF_FAILED(swapChain.As(&m_swapChain), "Failed to obtain the DXGI swap chain.");
   m_swapChain->SetMaximumFrameLatency(kFramesInFlight); // Set maximum number of Present() calls that will be queued.
@@ -152,11 +160,9 @@ void D3D12HelloTriangle::LoadPipeline()
   }
 
   // Create command allocators.
-  //
-  // One allocator per frame in flight: while the GPU executes frame N's
-  // commands, the CPU records frame N+1 into the other one. An allocator
-  // may only be reset once its fence has passed.
   {
+    // One allocator per frame in flight: while the GPU executes frame N's
+    // commands, the CPU records frame N+1 into the other one.
     for (UINT n = 0; n < kFramesInFlight; ++n)
     {
       COM_ERROR_IF_FAILED(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[n])), "Failed to create a command allocator");
@@ -167,14 +173,31 @@ void D3D12HelloTriangle::LoadPipeline()
 // Load the sample assets.
 void D3D12HelloTriangle::LoadAssets()
 {
+  D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData {
+    .HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1
+  };
+
+  if (FAILED(m_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureData, sizeof(featureData))))
+  {
+    featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
+  }
+
   // Create an empty root signature.
   {
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
-    rootSignatureDesc.Init(0, nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+    // Allow input layout and deny uneccessary access to certain pipeline stages.
+    D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags =
+      D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_PIXEL_SHADER_ROOT_ACCESS;
+
+    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
+    rootSignatureDesc.Init_1_1(0, nullptr, 0, nullptr, rootSignatureFlags);
 
     ComPtr<ID3DBlob> signature;
     ComPtr<ID3DBlob> error;
-    COM_ERROR_IF_FAILED(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error), "Failed to serialize the root signature.");
+    COM_ERROR_IF_FAILED(D3DX12SerializeVersionedRootSignature(&rootSignatureDesc, featureData.HighestVersion, &signature, &error), "Failed to serialize the root signature.");
     COM_ERROR_IF_FAILED(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)), "Failed to create the root signature.");
   }
 
@@ -283,6 +306,9 @@ void D3D12HelloTriangle::OnUpdate()
 // Render the scene.
 void D3D12HelloTriangle::OnRender()
 {
+  if (!m_windowVisible)
+    return;
+
   BeginFrame();
 
   // Record all the commands we need to render the scene into the command list.
@@ -293,9 +319,81 @@ void D3D12HelloTriangle::OnRender()
   m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
   // Present the frame.
-  COM_ERROR_IF_FAILED(m_swapChain->Present(1, 0), "Failed to present the frame.");
+  //COM_ERROR_IF_FAILED(m_swapChain->Present(1, 0), "Failed to present the frame.");
+
+  // When using sync interval 0, it is recommended to always pass the tearing
+  // flag when it is supported, even when presenting in windowed mode.
+  // However, this flag cannot be used if the app is in fullscreen mode as a
+  // result of calling SetFullscreenState.
+  UINT present_flags = (m_tearingSupport && m_windowedMode) ? DXGI_PRESENT_ALLOW_TEARING : 0;
+  COM_ERROR_IF_FAILED(m_swapChain->Present(0, present_flags), "Failed to present the frame.");
 
   EndFrame();
+}
+
+void D3D12HelloTriangle::OnSizeChanged(UINT width, UINT height, bool minimized)
+{
+  if (minimized || (width == m_width && height == m_height))
+    goto UpdateWindowState;
+
+  m_width = width;
+  m_height = height;
+  m_aspectRatio = static_cast<float>(width) / static_cast<float>(height);
+
+  // Flush all remaining GPU commands.
+  WaitForGpu();
+
+  // Release resources holding references to the swap chain.
+  for (UINT n = 0; n < kBufferCount; ++n) 
+  {
+    m_renderTargets[n].Reset();
+  }
+
+  // Reset the fence values to the current fance value.
+  for (UINT n = 0; n < kFramesInFlight; ++n) 
+  {
+    m_fenceValues[n] = m_fenceValues[m_frameIndex];
+  }
+
+  // Resize the swap chain.
+  DXGI_SWAP_CHAIN_DESC swapChainDesc{};
+  m_swapChain->GetDesc(&swapChainDesc);
+  COM_ERROR_IF_FAILED(m_swapChain->ResizeBuffers(
+      kBufferCount,
+      m_width,
+      m_height,
+      swapChainDesc.BufferDesc.Format,
+      swapChainDesc.Flags
+    ), 
+    "Failed to resize swap chain."
+  );
+
+  // Reset the frame index to the current back buffer index.
+  m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+
+  BOOL fullscreenState;
+  COM_ERROR_IF_FAILED(m_swapChain->GetFullscreenState(&fullscreenState, nullptr), "Failed to obtain fullscreen state.");
+  m_windowedMode = !fullscreenState;
+
+  // Recreate frame resources.
+  {
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
+
+    // Recreate a RTV for each frame.
+    for (UINT n = 0; n < kBufferCount; ++n)
+    {
+      COM_ERROR_IF_FAILED(m_swapChain->GetBuffer(n, IID_PPV_ARGS(&m_renderTargets[n])), "Failed to obtain the swap chain back buffer.");
+      m_device->CreateRenderTargetView(m_renderTargets[n].Get(), nullptr, rtvHandle);
+      rtvHandle.Offset(1, m_rtvDescriptorSize);
+    }
+  }
+
+  // Resize screen viewport to match the current window size.
+  m_viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(m_width), static_cast<float>(m_height));
+  m_scissorRect = CD3DX12_RECT(0.0f, 0.0f, static_cast<LONG>(m_width), static_cast<LONG>(m_height));
+
+UpdateWindowState:
+  m_windowVisible = !minimized;
 }
 
 void D3D12HelloTriangle::OnDestroy()
@@ -304,8 +402,43 @@ void D3D12HelloTriangle::OnDestroy()
   // cleaned up by the destructor.
   WaitForGpu();
 
+  if (!m_tearingSupport)
+  {
+    // Fullscreen state should always be false before exiting the app.
+    COM_ERROR_IF_FAILED(m_swapChain->SetFullscreenState(FALSE, nullptr), "Failed to set fullscreen state to off.");
+  }
+
   CloseHandle(m_fenceEvent);
   CloseHandle(m_frameLatencyWaitable);
+}
+
+void D3D12HelloTriangle::OnKeyDown(UINT8 key)
+{
+  switch (key)
+  {
+
+  // Instrument the Space Bar to toggle between fullscreen states.
+  // The window message loop callback will receive a WM_SIZE message once the
+  // window is in the fullscreen state. At that point, the IDXGISwapChain should
+  // be resized to match the new window size
+  case VK_SPACE:
+  {
+    if (m_tearingSupport)
+    {
+      Win32Application::ToggleFullscreenWindow(m_swapChain.Get());
+    }
+    else
+    {
+      BOOL fullscreen_state = FALSE;
+      COM_ERROR_IF_FAILED(m_swapChain->GetFullscreenState(&fullscreen_state, nullptr), "Failed to obtain fullscreen state from the swap chain.");
+      
+      // Transitions to fullscreen mode can fail when running apps over
+      // terminal services or for some other unexpected reason.
+      COM_ERROR_IF_FAILED(m_swapChain->SetFullscreenState(!fullscreen_state, nullptr), "Fullscreen transition failed.");
+    }
+  }
+
+  }
 }
 
 void D3D12HelloTriangle::PopulateCommandList()

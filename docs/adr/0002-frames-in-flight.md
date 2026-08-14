@@ -54,6 +54,13 @@ resource barrier on a different surface than the one being rendered to.
 2. The fence value recorded for this slot. This is what makes resetting
    the allocator safe.
 
+`m_backBufferIndex = m_swapChain->GetCurrentBackBufferIndex()` is called
+only after both waits above, never before. For a waitable swap chain this
+is a real ordering requirement, not a style choice: the returned index is
+only meaningful once DXGI has retired a slot in the present queue, which
+is exactly what the wait on the frame latency waitable object guarantees.
+Querying it earlier risks reading an index DXGI has not finished retiring.
+
 Both are required. The waitable object knows only about presents; it has
 no knowledge of command allocators and cannot protect them. This becomes
 unambiguous once a compute queue is added, since that queue never
@@ -130,6 +137,16 @@ fence=27 slot=0 bb=2 completed=27
 fence=28 slot=1 bb=0 completed=27
 fence=29 slot=0 bb=1 completed=29
 ```
+
+Reading this against the table above: the `fence` field is sampled inside
+`BeginFrame`, before that same iteration's `EndFrame` runs — so it always
+reports the value signalled at the end of the *previous* iteration, not
+the one this iteration is about to produce. Numbering log lines by
+iteration (line 1 = frame 0, line 2 = frame 1, ...): frame 0's own signal
+(2, per the table) doesn't appear until line 2; line 1's `fence=1` is the
+priming signal `WaitForGpu` issued at the end of `LoadAssets`, before the
+render loop starts. `slot` and `bb` are current-state reads and line up
+with the table's `frame` column directly; `fence` is one iteration behind.
 
 `slot` cycles 0,1 while `bb` cycles 0,1,2. The pair repeats every six
 frames, the lcm of 2 and 3. The indices are genuinely independent.

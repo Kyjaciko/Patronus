@@ -2,6 +2,9 @@
 #include "Win32Application.h"
 
 HWND Win32Application::m_hwnd = nullptr;
+bool Win32Application::m_fullscreenMode = false;
+RECT Win32Application::m_windowRect;
+using Microsoft::WRL::ComPtr;
 
 int Win32Application::Run(DXSample* pSample, HINSTANCE hInstance, int nCmdShow)
 {
@@ -61,6 +64,63 @@ int Win32Application::Run(DXSample* pSample, HINSTANCE hInstance, int nCmdShow)
   return static_cast<char>(msg.wParam);
 }
 
+void Win32Application::ToggleFullscreenWindow(IDXGISwapChain* pSwapChain)
+{
+  assert(pSwapChain != nullptr);
+
+  if (m_fullscreenMode)
+  {
+    // Restore the window's attributes and size.
+    SetWindowLong(m_hwnd, GWL_STYLE, m_windowStyle);
+    
+    SetWindowPos(
+      m_hwnd,
+      HWND_NOTOPMOST,
+      m_windowRect.left,
+      m_windowRect.top,
+      m_windowRect.right - m_windowRect.left,
+      m_windowRect.bottom - m_windowRect.top,
+      SWP_FRAMECHANGED | SWP_NOACTIVATE
+    );
+
+    ShowWindow(m_hwnd, SW_NORMAL);
+  }
+  else
+  {
+    // Save the old window rect so we can restore it when exiting fullscreen mode.
+    GetWindowRect(m_hwnd, &m_windowRect);
+
+    // Make the window borderless so that the client area can fill the screen.
+    SetWindowLong(m_hwnd, GWL_STYLE, m_windowStyle & ~(WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU | WS_THICKFRAME));
+
+    RECT fullscreenWindowRect;
+    if (pSwapChain)
+    {
+      // Get the settings of the display on which the app's window is currently displayed
+      ComPtr<IDXGIOutput> pOutput;
+      COM_ERROR_IF_FAILED(pSwapChain->GetContainingOutput(&pOutput), "Failed to get the output that contains the majority of the client area of the target window.");
+
+      DXGI_OUTPUT_DESC Desc;
+      COM_ERROR_IF_FAILED(pOutput->GetDesc(&Desc), "Failed to get a description of the output.");
+      fullscreenWindowRect = Desc.DesktopCoordinates;
+    }
+
+    SetWindowPos(
+      m_hwnd,
+      HWND_TOPMOST,
+      fullscreenWindowRect.left,
+      fullscreenWindowRect.top,
+      fullscreenWindowRect.right - fullscreenWindowRect.left,
+      fullscreenWindowRect.bottom - fullscreenWindowRect.top,
+      SWP_FRAMECHANGED | SWP_NOACTIVATE
+    );
+
+    ShowWindow(m_hwnd, SW_MAXIMIZE);
+  }
+
+  m_fullscreenMode = !m_fullscreenMode;
+}
+
 // Main message handler for the sample.
 LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -97,6 +157,18 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
       pSample->OnRender();
     }
     return 0;
+
+  case WM_SIZE:
+  {
+    if (!pSample)
+      return 0;
+
+    RECT client_rect{};
+    GetClientRect(hWnd, &client_rect);
+    pSample->OnSizeChanged(client_rect.right - client_rect.left, client_rect.bottom - client_rect.top, wParam == SIZE_MINIMIZED);
+
+    return 0;
+  }
 
   case WM_DESTROY:
     PostQuitMessage(0);

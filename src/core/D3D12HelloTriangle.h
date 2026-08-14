@@ -17,10 +17,14 @@ class D3D12HelloTriangle : public DXSample
 public:
   D3D12HelloTriangle(UINT width, UINT height, std::wstring name);
 
+protected:
   void OnInit() override;
   void OnUpdate() override;
   void OnRender() override;
+  void OnSizeChanged(UINT width, UINT height, bool minimized) override;
   void OnDestroy() override;
+
+  void OnKeyDown(UINT8 key) override;
 
 private:
   // Two independent numbers, deliberately not shared:
@@ -66,6 +70,10 @@ private:
   HANDLE m_frameLatencyWaitable;
   ComPtr<ID3D12Fence> m_fence;
   UINT64 m_fenceValues[kFramesInFlight];
+
+  // Window state.
+  bool m_windowVisible;
+  bool m_windowedMode;
 
   void LoadPipeline();
   void LoadAssets();

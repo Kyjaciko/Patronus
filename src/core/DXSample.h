@@ -12,11 +12,12 @@ public:
   virtual void OnInit() = 0;
   virtual void OnUpdate() = 0;
   virtual void OnRender() = 0;
+  virtual void OnSizeChanged(UINT width, UINT height, bool minimized) = 0;
   virtual void OnDestroy() = 0;
 
   // Samples override the event handlers to handle specific messages.
-  virtual void OnKeyDown(UINT8 /*key*/)   {}
-  virtual void OnKeyUp(UINT8 /*key*/)     {}
+  virtual void OnKeyDown(UINT8 /*key*/) {}
+  virtual void OnKeyUp(UINT8 /*key*/) {}
 
   // Accessors.
   UINT GetWidth() const           { return m_width; }
@@ -39,6 +40,9 @@ protected:
   UINT m_width;
   UINT m_height;
   float m_aspectRatio;
+
+  // Whether or not tearing is available for fullscreen borderless windowed mode.
+  BOOL m_tearingSupport = FALSE;
 
   // Adapter info.
   bool m_useWarpDevice;
