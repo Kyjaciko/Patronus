@@ -98,10 +98,10 @@ void D3D12HelloTriangle::LoadPipeline()
     .Height = m_height, 
     .Format = DXGI_FORMAT_R8G8B8A8_UNORM,
     .Stereo = FALSE,
-    .SampleDesc = { .Count = 1, .Quality = 0 }, // MSAA turned OFF; flip models don't support this!
+    .SampleDesc = { .Count = 1, .Quality = 0 }, // MSAA turned OFF; flip models don't support MSAA directly on a swap chain!
     .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
     .BufferCount = kBufferCount,
-    .Scaling = DXGI_SCALING_NONE, // Disabled streching to test if window resizing works properly.
+    .Scaling = DXGI_SCALING_STRETCH,
     .SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
     .AlphaMode = DXGI_ALPHA_MODE_IGNORE, // OS Window ignores alpha channel (not the pipeline!)
     .Flags = 
@@ -319,14 +319,16 @@ void D3D12HelloTriangle::OnRender()
   m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
   // Present the frame.
-  //COM_ERROR_IF_FAILED(m_swapChain->Present(1, 0), "Failed to present the frame.");
-
-  // When using sync interval 0, it is recommended to always pass the tearing
-  // flag when it is supported, even when presenting in windowed mode.
-  // However, this flag cannot be used if the app is in fullscreen mode as a
-  // result of calling SetFullscreenState.
-  UINT present_flags = (m_tearingSupport && m_windowedMode) ? DXGI_PRESENT_ALLOW_TEARING : 0;
-  COM_ERROR_IF_FAILED(m_swapChain->Present(0, present_flags), "Failed to present the frame.");
+  if (m_VSync)
+    COM_ERROR_IF_FAILED(m_swapChain->Present(1, 0), "Failed to present the frame with VSync ON.");
+  else
+  {
+    // When VSync is disabled, use DXGI_PRESENT_ALLOW_TEARING when supported.
+    // The tearing flag cannot be used for fullscreen mode entered through
+    // SetFullscreenState.
+    UINT present_flags = (m_tearingSupport && m_windowedMode) ? DXGI_PRESENT_ALLOW_TEARING : 0;
+    COM_ERROR_IF_FAILED(m_swapChain->Present(0, present_flags), "Failed to present the frame.");
+  }
 
   EndFrame();
 }
@@ -369,7 +371,7 @@ void D3D12HelloTriangle::OnSizeChanged(UINT width, UINT height, bool minimized)
   );
 
   // Reset the frame index to the current back buffer index.
-  m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+  m_backBufferIndex = m_swapChain->GetCurrentBackBufferIndex();
 
   BOOL fullscreenState;
   COM_ERROR_IF_FAILED(m_swapChain->GetFullscreenState(&fullscreenState, nullptr), "Failed to obtain fullscreen state.");
@@ -392,6 +394,10 @@ void D3D12HelloTriangle::OnSizeChanged(UINT width, UINT height, bool minimized)
   m_viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(m_width), static_cast<float>(m_height));
   m_scissorRect = CD3DX12_RECT(0.0f, 0.0f, static_cast<LONG>(m_width), static_cast<LONG>(m_height));
 
+  wchar_t updatedTitle[256];
+  swprintf_s(updatedTitle, L"( %u x %u )", m_width, m_height);
+  SetCustomWindowText(updatedTitle);
+
 UpdateWindowState:
   m_windowVisible = !minimized;
 }
@@ -404,6 +410,10 @@ void D3D12HelloTriangle::OnDestroy()
 
   if (!m_tearingSupport)
   {
+    // TODO: When Present(), ResizeBuffers etc. fails, COM_ERROR_IF_FAILED terminates
+    // the process immediately using exit(-1). Exclusive fullscreen
+    // is left un-exited which is a known way to leave the driver in a bad state.
+
     // Fullscreen state should always be false before exiting the app.
     COM_ERROR_IF_FAILED(m_swapChain->SetFullscreenState(FALSE, nullptr), "Failed to set fullscreen state to off.");
   }

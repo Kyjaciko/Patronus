@@ -66,7 +66,7 @@ int Win32Application::Run(DXSample* pSample, HINSTANCE hInstance, int nCmdShow)
 
 void Win32Application::ToggleFullscreenWindow(IDXGISwapChain* pSwapChain)
 {
-  assert(pSwapChain != nullptr);
+  if (!pSwapChain) return;
 
   if (m_fullscreenMode)
   {
@@ -158,6 +158,13 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
     }
     return 0;
 
+  // If the window is continously resized WM_SIZE is called numerous amount of times
+  // which will cause the swap chain to lag behind. WM_EXITSIZEMOVE is not an option either
+  // since it doesn't get called when going into fullscreen or maximizing the window.
+  //
+  // Accepted for now: dragging is an editor-only concern and DXGI_SCALING_STRETCH
+  // keeps it visually acceptable. The structural fix is decoupling the frame
+  // loop from the message pump with a dedicated render thread.
   case WM_SIZE:
   {
     if (!pSample)
