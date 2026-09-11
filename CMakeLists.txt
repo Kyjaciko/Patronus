@@ -81,6 +81,9 @@ add_executable(D3D12HelloTriangle WIN32
   src/core/stdafx.cpp
   src/core/DXSample.cpp
   src/core/Win32Application.cpp
+  src/core/GameObject.cpp
+  src/core/GameObject3D.cpp
+  src/core/Camera3D.cpp
   src/core/D3D12HelloTriangle.cpp
   src/rhi/AgilitySDKExports.cpp
 )
