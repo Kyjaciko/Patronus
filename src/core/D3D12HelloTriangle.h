@@ -3,6 +3,8 @@
 #include "DXSample.h"
 #include "COMException.h"
 
+#include "Camera3D.h"
+
 using namespace DirectX;
 
 // Note that while ComPtr is used to manage the lifetime of resources on the CPU,
@@ -38,7 +40,7 @@ private:
   static constexpr UINT kBufferCount = 3;
   static constexpr UINT kFramesInFlight = 2;
 
-  static constexpr UINT kParticleCount = 500'000;
+  static constexpr UINT kParticleCount = 500;
 
   struct Vertex
   {
@@ -75,24 +77,49 @@ private:
 
   // Particle system.
   ComPtr<ID3D12DescriptorHeap> m_particleSrvUavHeap;
-  //UINT m_particleSrvUavDescriptorSize;
+  UINT m_particleSrvUavDescriptorSize;
 
   enum ParticleHeap : UINT 
   {
     PoolUAV = 0, // Compute shader updates the particles in this buffer.
+    PoolSRV, // Vertex shader creates 4 vertices per index.
+    //CameraCb,
     Count
   };
 
+  ComPtr<ID3D12PipelineState> m_particlePipelineState;
   ComPtr<ID3D12RootSignature> m_computeRootSignature;
   ComPtr<ID3D12PipelineState> m_computePipelineState;
   ComPtr<ID3D12Resource> m_particleUploadBuffer; // Since Default Heap can't directly be written to from the CPU we use a upload heap.
   ComPtr<ID3D12Resource> m_particlePool; // Pre-allocated structured buffer, to 'remove' dynamic memory allocations in GPU memory.
+  ComPtr<ID3D12Resource> m_cameraCB; // Should have a constant buffer per frame in flight.
+  Camera3D m_camera;
 
   struct Particle
   {
     DirectX::XMFLOAT3 pos{};
+    DirectX::XMFLOAT3 vel{};
+    float             lifetime{};
     float             _pad{};
   };
+
+  // Variables within constant buffers need to be 16 byte aligned!
+  struct CameraCB
+  {
+    // 4x 16 bytes.
+    DirectX::XMFLOAT4X4 viewProj{};
+
+    // 16 bytes.
+    DirectX::XMFLOAT3 camRight{};
+    float             billboardSize{};
+
+    // 16 bytes.
+    DirectX::XMFLOAT3 camUp{};
+    float             _pad{};
+  };
+
+  // Check if 16 byte alignment is met.
+  static_assert(sizeof(CameraCB) % 16 == 0);
 
   // Window state.
   bool m_windowVisible;

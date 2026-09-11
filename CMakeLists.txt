@@ -156,6 +156,8 @@ add_custom_command(TARGET D3D12HelloTriangle POST_BUILD
 set(_hello_triangle_vs_cso "${CMAKE_BINARY_DIR}/$<CONFIG>/shaders_VSMain.cso")
 set(_hello_triangle_ps_cso "${CMAKE_BINARY_DIR}/$<CONFIG>/shaders_PSMain.cso")
 set(_particle_cs_cso "${CMAKE_BINARY_DIR}/$<CONFIG>/shaders_CSMain.cso")
+set(_particle_vs_cso "${CMAKE_BINARY_DIR}/$<CONFIG>/particle_shaders_VSMain.cso")
+set(_particle_ps_cso "${CMAKE_BINARY_DIR}/$<CONFIG>/particle_shaders_PSMain.cso")
 
 # Deliberately NOT using $<TARGET_FILE_DIR:D3D12HelloTriangle> for the
 # outputs above: since these custom commands' outputs are made a build
@@ -195,5 +197,24 @@ add_custom_command(
   COMMENT "Compiling computeshader.hlsl:CSMain (cs_6_6)"
   VERBATIM
 )
-add_custom_target(ParticleShaders DEPENDS "${_particle_cs_cso}")
+
+add_custom_command(
+  OUTPUT "${_particle_vs_cso}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/$<CONFIG>"
+  COMMAND "${PATRONUS_DXC_EXECUTABLE}" -T vs_5_1 -E VSMain
+          -Fo "${_particle_vs_cso}" "${CMAKE_SOURCE_DIR}/src/core/particleshader.hlsl"
+  DEPENDS "${CMAKE_SOURCE_DIR}/src/core/particleshader.hlsl"
+  COMMENT "Compiling particleshader.hlsl:VSMain (vs_5_1)"
+  VERBATIM
+)
+add_custom_command(
+  OUTPUT "${_particle_ps_cso}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/$<CONFIG>"
+  COMMAND "${PATRONUS_DXC_EXECUTABLE}" -T ps_5_1 -E PSMain
+          -Fo "${_particle_ps_cso}" "${CMAKE_SOURCE_DIR}/src/core/particleshader.hlsl"
+  DEPENDS "${CMAKE_SOURCE_DIR}/src/core/particleshader.hlsl"
+  COMMENT "Compiling particleshader.hlsl:PSMain (ps_5_1)"
+  VERBATIM
+)
+add_custom_target(ParticleShaders DEPENDS "${_particle_cs_cso}" "${_particle_vs_cso}" "${_particle_ps_cso}")
 add_dependencies(D3D12HelloTriangle ParticleShaders)

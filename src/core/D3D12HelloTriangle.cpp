@@ -12,6 +12,7 @@ D3D12HelloTriangle::D3D12HelloTriangle(UINT width, UINT height, std::wstring nam
   m_fenceEvent(nullptr),
   m_frameLatencyWaitable(nullptr),
   m_fenceValues{},
+  m_camera(90.f, static_cast<float>(width) / static_cast<float>(height), 0.1f, 1000.f),
   m_windowVisible(true),
   m_windowedMode(true)
 {
@@ -155,7 +156,7 @@ void D3D12HelloTriangle::LoadPipeline()
 
     COM_ERROR_IF_FAILED(m_device->CreateDescriptorHeap(&particleSrvUavHeapDesc, IID_PPV_ARGS(&m_particleSrvUavHeap)), "Failed to create the particle system descriptor heap.");
 
-    //m_particleSrvUavDescriptorSize = m_device->GetDescriptorHandleIncrementSize(particleSrvUavHeapDesc.Type);
+    m_particleSrvUavDescriptorSize = m_device->GetDescriptorHandleIncrementSize(particleSrvUavHeapDesc.Type);
   }
 
   // Create frame resources.
@@ -204,8 +205,17 @@ void D3D12HelloTriangle::LoadAssets()
       D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS |
       D3D12_ROOT_SIGNATURE_FLAG_DENY_PIXEL_SHADER_ROOT_ACCESS;
 
+    // Define one SRV slot at register t0 for the structured buffer (m_particlePool).
+    CD3DX12_DESCRIPTOR_RANGE1 srvRange;
+    srvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+
+    // Put the SRV descriptor and a constant buffer into root parameters and make it visible to the vertex shader.
+    CD3DX12_ROOT_PARAMETER1 rootParameters[2];
+    rootParameters[0].InitAsConstantBufferView(0, 0, D3D12_ROOT_DESCRIPTOR_FLAG_NONE, D3D12_SHADER_VISIBILITY_ALL); // b0
+    rootParameters[1].InitAsDescriptorTable(1, &srvRange, D3D12_SHADER_VISIBILITY_VERTEX);
+
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
-    rootSignatureDesc.Init_1_1(0, nullptr, 0, nullptr, rootSignatureFlags);
+    rootSignatureDesc.Init_1_1(_countof(rootParameters), rootParameters, 0, nullptr, rootSignatureFlags);
 
     ComPtr<ID3DBlob> signature;
     ComPtr<ID3DBlob> error;
@@ -220,8 +230,18 @@ void D3D12HelloTriangle::LoadAssets()
     UINT vertexShaderDataLength = 0;
     UINT pixelShaderDataLength = 0;
 
+    // Simpel shaders for drawing the triangle.
     COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"shaders_VSMain.cso").c_str(), &pVertexShaderData, &vertexShaderDataLength), "Failed to read the vertex shader.");
     COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"shaders_PSMain.cso").c_str(), &pPixelShaderData, &pixelShaderDataLength), "Failed to read the pixel shader.");
+
+    UINT8* pParticleVertexShaderData = nullptr;
+    UINT8* pParticlePixelShaderData = nullptr;
+    UINT particleVertexShaderDataLength = 0;
+    UINT particlePixelShaderDataLength = 0;
+
+    // Shaders to draw the particles.
+    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"particle_shaders_VSMain.cso").c_str(), &pParticleVertexShaderData, &particleVertexShaderDataLength), "Failed to read the particle vertex shader.");
+    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"particle_shaders_PSMain.cso").c_str(), &pParticlePixelShaderData, &particlePixelShaderDataLength), "Failed to read the particle pixel shader.");
 
     // Define the vertex input layout.
     D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
@@ -247,6 +267,12 @@ void D3D12HelloTriangle::LoadAssets()
     psoDesc.SampleDesc.Count = 1;
     COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)), "Failed to create the graphics pipeline state.");
   
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC particlePsoDesc(psoDesc);
+    particlePsoDesc.InputLayout = { nullptr, 0 }; // No vertex input layout, very important since we use SV_VertexID!
+    particlePsoDesc.VS = CD3DX12_SHADER_BYTECODE(pParticleVertexShaderData, particleVertexShaderDataLength);
+    particlePsoDesc.PS = CD3DX12_SHADER_BYTECODE(pParticlePixelShaderData, particlePixelShaderDataLength);
+    COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&particlePsoDesc, IID_PPV_ARGS(&m_particlePipelineState)), "Failed to create the particle graphics pipeline state.");
+
     free(pVertexShaderData);
     free(pPixelShaderData);
   }
@@ -356,10 +382,51 @@ void D3D12HelloTriangle::LoadAssets()
 
       for (UINT i = 0; i < kParticleCount; ++i)
       {
-        pParticleDataBegin[i] = {};
+        constexpr float spacing = 0.15f;
+        constexpr UINT columns = 25;
+
+        const UINT column = i % columns;
+        const UINT row    = i / columns;
+
+        const float x = (static_cast<float>(column) - (columns - 1) * 0.5f) * spacing;
+        const float y = (static_cast<float>(row) - (columns - 1) * 0.5f) * spacing;
+
+        pParticleDataBegin[i] = {
+          .pos = { x, y, -5.f},
+          .vel = { 0.001f, 0.f, 0.f },
+          .lifetime = 1000.f
+        };
       }
 
       m_particleUploadBuffer->Unmap(0, nullptr);
+    }
+
+    // The constant buffer size (and in that regard also the address) needs to be a multiple of 256 bytes!
+    static constexpr UINT cameraSizeCB = (sizeof(CameraCB) + D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT - 1) & ~(D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT - 1);
+
+    // Copy camera data to constant buffer for particle system.
+    COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+        D3D12_HEAP_FLAG_NONE,
+        &CD3DX12_RESOURCE_DESC::Buffer(cameraSizeCB),
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&m_cameraCB)
+      ), 
+      "Failed to create the vertex buffer."
+    );
+
+    {
+      CameraCB* pCameraDataBegin = nullptr;
+      CD3DX12_RANGE readRange(0, 0);
+      COM_ERROR_IF_FAILED(m_cameraCB->Map(0, &readRange, reinterpret_cast<void**>(&pCameraDataBegin)), "Failed to map the constant buffer that holds the camera data.");
+
+      DirectX::XMStoreFloat4x4(&pCameraDataBegin->viewProj, m_camera.GetViewMatrix() * m_camera.GetProjectionMatrix());
+      DirectX::XMStoreFloat3(&pCameraDataBegin->camRight, m_camera.GetRightVector());
+      pCameraDataBegin->billboardSize = 0.05f;
+      DirectX::XMStoreFloat3(&pCameraDataBegin->camUp, m_camera.GetUpVector());
+
+      m_cameraCB->Unmap(0, nullptr);
     }
 
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc {
@@ -374,7 +441,26 @@ void D3D12HelloTriangle::LoadAssets()
       }
     };
 
-    m_device->CreateUnorderedAccessView(m_particlePool.Get(), nullptr, &uavDesc, m_particleSrvUavHeap->GetCPUDescriptorHandleForHeapStart());
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc {
+      .Format = DXGI_FORMAT_UNKNOWN,
+      .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+      .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+      .Buffer = {
+        .FirstElement = 0,
+        .NumElements = kParticleCount,
+        .StructureByteStride = sizeof(Particle),
+        .Flags = D3D12_BUFFER_SRV_FLAG_NONE
+      }
+    };
+
+    // Create the UAV for the compute shader.
+    CD3DX12_CPU_DESCRIPTOR_HANDLE particleHeap(m_particleSrvUavHeap->GetCPUDescriptorHandleForHeapStart());
+    CD3DX12_CPU_DESCRIPTOR_HANDLE uavHandle(particleHeap, ParticleHeap::PoolUAV, m_particleSrvUavDescriptorSize);
+    m_device->CreateUnorderedAccessView(m_particlePool.Get(), nullptr, &uavDesc, uavHandle);
+    
+    // Create the SRV for the vertex shader.
+    CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(particleHeap, ParticleHeap::PoolSRV, m_particleSrvUavDescriptorSize);
+    m_device->CreateShaderResourceView(m_particlePool.Get(), &srvDesc, srvHandle);
 
     // Copy the triangle data to the vertex buffer.
     UINT8* pVertexDataBegin = nullptr;
@@ -569,21 +655,37 @@ void D3D12HelloTriangle::PopulateCommandList()
   COM_ERROR_IF_FAILED(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), nullptr), "Failed to reset the command list.");
 
   // Copy data from upload heap (filled by CPU) to Default Heap.
-  m_commandList->CopyResource(m_particlePool.Get(), m_particleUploadBuffer.Get());
+  static bool firstRun = false;
+  if (!firstRun)
+  {
+    m_commandList->CopyResource(m_particlePool.Get(), m_particleUploadBuffer.Get());
 
-  // Change Default Heap (m_particlePool) from COPY_DEST to UNORDERED_ACCESS.
-  m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
+    // Change Default Heap (m_particlePool) from COPY_DEST to UNORDERED_ACCESS.
+    m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
+  
+    firstRun = true;
+  }
+  // m_commandList->CopyResource(m_particlePool.Get(), m_particleUploadBuffer.Get());
+
+  // // Change Default Heap (m_particlePool) from COPY_DEST to UNORDERED_ACCESS.
+  // m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
 
   // Compute pass.
   ID3D12DescriptorHeap* ppHeaps[] = { m_particleSrvUavHeap.Get() };
   m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
 
+  CD3DX12_GPU_DESCRIPTOR_HANDLE particleHeap(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
+  CD3DX12_GPU_DESCRIPTOR_HANDLE uavHandle(particleHeap, ParticleHeap::PoolUAV, m_particleSrvUavDescriptorSize);
+
   m_commandList->SetPipelineState(m_computePipelineState.Get());
   m_commandList->SetComputeRootSignature(m_computeRootSignature.Get());
-  m_commandList->SetComputeRootDescriptorTable(0, m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
+  m_commandList->SetComputeRootDescriptorTable(0, uavHandle);
 
   constexpr UINT threadGroupCountX = (kParticleCount + 255) / 256; // Round up NOT down.
   m_commandList->Dispatch(threadGroupCountX, 1, 1);
+
+  // Change Default Heap (m_particlePool) from UNORDERED_ACCESS to SHADER_RESOURCE.
+  m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
 
   // Graphics pass.
   m_commandList->SetPipelineState(m_pipelineState.Get());
@@ -597,12 +699,21 @@ void D3D12HelloTriangle::PopulateCommandList()
   CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_backBufferIndex, m_rtvDescriptorSize);
   m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-  // Record commands.
+  // Draw triangle.
   const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
   m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
   m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
   m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
   m_commandList->DrawInstanced(3, 1, 0, 0);
+
+  // Draw particles.
+  m_commandList->SetPipelineState(m_particlePipelineState.Get());
+  //m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+  m_commandList->SetGraphicsRootConstantBufferView(0, m_cameraCB->GetGPUVirtualAddress());
+  CD3DX12_GPU_DESCRIPTOR_HANDLE srvHandle(particleHeap, ParticleHeap::PoolSRV, m_particleSrvUavDescriptorSize);
+  m_commandList->SetGraphicsRootDescriptorTable(1, srvHandle);
+  m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+  m_commandList->DrawInstanced(4, kParticleCount, 0, 0);
 
   // Indicate that the back buffer will now be used to present.
   m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_backBufferIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));

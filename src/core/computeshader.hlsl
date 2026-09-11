@@ -1,6 +1,8 @@
 struct Particle
 {
   float3 pos;
+  float3 vel;
+  float lifetime;
   float _pad;
 };
 
@@ -10,13 +12,12 @@ RWStructuredBuffer<Particle> gParticles : register(u0);
 void CSMain(uint3 id : SV_DispatchThreadID)
 {
   uint i = id.x;
-  if (i >= 500000) // kParticleCount
+  if (i >= 500) // kParticleCount
     return;
 
   Particle p = gParticles[i];
-
-  float3 velocity = { 1.5f, 0.5f, 1.f };
-  p.pos += velocity * 0.01f;
+  p.pos += p.vel;
+  if (p.lifetime > 0.f) p.lifetime -= 1.f; // For now a constant, should be deltaTime.
 
   gParticles[i] = p;
 }

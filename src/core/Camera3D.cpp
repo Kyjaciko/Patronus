@@ -11,6 +11,12 @@ Camera3D::Camera3D()
 	UpdateMatrix();
 }
 
+Camera3D::Camera3D(float fovDegrees, float aspectRatio, float nearZ, float farZ)
+	: Camera3D()
+{
+	this->SetProjectionValues(fovDegrees, aspectRatio, nearZ, farZ);
+}
+
 void Camera3D::SetProjectionValues(float fovDegrees, float aspectRatio, float nearZ, float farZ)
 {
 	const float fovRadians = DirectX::XMConvertToRadians(fovDegrees);

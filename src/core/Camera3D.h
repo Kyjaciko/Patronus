@@ -7,6 +7,7 @@ class Camera3D : public GameObject3D
 {
 public:
 	Camera3D();
+	Camera3D(float fovDegrees, float aspectRatio, float nearZ, float farZ);
 
 	void SetProjectionValues(float fovDegrees, float aspectRatio, float nearZ, float farZ);
 
