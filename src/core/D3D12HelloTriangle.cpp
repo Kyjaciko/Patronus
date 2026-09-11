@@ -138,12 +138,24 @@ void D3D12HelloTriangle::LoadPipeline()
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc {
       .Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
       .NumDescriptors = kBufferCount,
-      .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE
+      .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
+      .NodeMask = 0
     };
 
     COM_ERROR_IF_FAILED(m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap)), "Failed to create the descriptor heap.");
 
     m_rtvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(rtvHeapDesc.Type);
+
+    D3D12_DESCRIPTOR_HEAP_DESC particleSrvUavHeapDesc {
+      .Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+      .NumDescriptors = ParticleHeap::Count,
+      .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
+      .NodeMask = 0
+    };
+
+    COM_ERROR_IF_FAILED(m_device->CreateDescriptorHeap(&particleSrvUavHeapDesc, IID_PPV_ARGS(&m_particleSrvUavHeap)), "Failed to create the particle system descriptor heap.");
+
+    //m_particleSrvUavDescriptorSize = m_device->GetDescriptorHandleIncrementSize(particleSrvUavHeapDesc.Type);
   }
 
   // Create frame resources.
@@ -239,8 +251,45 @@ void D3D12HelloTriangle::LoadAssets()
     free(pPixelShaderData);
   }
 
+  {
+    // Define one UAV slot at register u0 for the structured buffer (m_particlePool).
+    CD3DX12_DESCRIPTOR_RANGE1 uavRange;
+    uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
+
+    // Put the UAV descriptor into a root parameter and make it visible to the compute shader.
+    CD3DX12_ROOT_PARAMETER1 computeRootParameter;
+    computeRootParameter.InitAsDescriptorTable(1, &uavRange, D3D12_SHADER_VISIBILITY_ALL);
+
+    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC computeRootSignatureDesc;
+    computeRootSignatureDesc.Init_1_1(1, &computeRootParameter, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
+
+    ComPtr<ID3DBlob> signature;
+    ComPtr<ID3DBlob> error;
+    COM_ERROR_IF_FAILED(D3DX12SerializeVersionedRootSignature(&computeRootSignatureDesc, featureData.HighestVersion, &signature, &error), "Failed to serialize the compute root signature.");
+    COM_ERROR_IF_FAILED(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_computeRootSignature)), "Failed to create the compute root signature.");
+  }
+
+  {
+    UINT8* pComputeShaderData = nullptr;
+    UINT computeShaderDataLength = 0;
+
+    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"shaders_CSMain.cso").c_str(), &pComputeShaderData, &computeShaderDataLength), "Failed to read the compute shader.");
+   
+    D3D12_COMPUTE_PIPELINE_STATE_DESC computePsoDesc {
+      .pRootSignature = m_computeRootSignature.Get(),
+      .CS = CD3DX12_SHADER_BYTECODE(pComputeShaderData, computeShaderDataLength),
+      .NodeMask = 0,
+      .CachedPSO = { nullptr, 0 },
+      .Flags = D3D12_PIPELINE_STATE_FLAG_NONE
+    };
+
+    COM_ERROR_IF_FAILED(m_device->CreateComputePipelineState(&computePsoDesc, IID_PPV_ARGS(&m_computePipelineState)), "Failed to create the compute pipeline state.");
+  
+    free(pComputeShaderData);
+  }
+
   // Create the command list.
-  COM_ERROR_IF_FAILED(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[m_frameIndex].Get(), m_pipelineState.Get(), IID_PPV_ARGS(&m_commandList)), "Failed to create the command list.");
+  COM_ERROR_IF_FAILED(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[m_frameIndex].Get(), nullptr, IID_PPV_ARGS(&m_commandList)), "Failed to create the command list.");
 
   // Command lists are created in the recording state, but there is nothing
   // to record yet. The main loop expects it to be closed, so close it now.
@@ -263,15 +312,72 @@ void D3D12HelloTriangle::LoadAssets()
     // over. Please read up on Default Heap usage. An upload heap is used here for 
     // code simplicity and because there are very few verts to actually transfer.
     COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
-      &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-      D3D12_HEAP_FLAG_NONE,
-      &CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize),
-      D3D12_RESOURCE_STATE_GENERIC_READ,
-      nullptr,
-      IID_PPV_ARGS(&m_vertexBuffer)), "Failed to create the vertex buffer.");
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+        D3D12_HEAP_FLAG_NONE,
+        &CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize),
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&m_vertexBuffer)
+      ), 
+      "Failed to create the vertex buffer."
+    );
+
+    const UINT particlePoolSize = sizeof(Particle) * kParticleCount;
+
+    // Place the particle pool (structured buffer) in the Default Heap.
+    COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+        D3D12_HEAP_FLAG_NONE,
+        &CD3DX12_RESOURCE_DESC::Buffer(particlePoolSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
+        D3D12_RESOURCE_STATE_COPY_DEST,
+        nullptr,
+        IID_PPV_ARGS(&m_particlePool)
+      ), 
+      "Failed to create the particle pool structured buffer."
+    );
+
+    // Upload heap to write data to the Default Heap (particle pool).
+    COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+        D3D12_HEAP_FLAG_NONE,
+        &CD3DX12_RESOURCE_DESC::Buffer(particlePoolSize),
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&m_particleUploadBuffer)
+      ), 
+      "Failed to create the vertex buffer."
+    );
+
+    // Copy data to upload heap for particle system.
+    {
+      Particle* pParticleDataBegin = nullptr;
+      CD3DX12_RANGE readRange(0, 0);
+      COM_ERROR_IF_FAILED(m_particleUploadBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pParticleDataBegin)), "Failed to map the upload heap for the particle system.");
+
+      for (UINT i = 0; i < kParticleCount; ++i)
+      {
+        pParticleDataBegin[i] = {};
+      }
+
+      m_particleUploadBuffer->Unmap(0, nullptr);
+    }
+
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc {
+      .Format = DXGI_FORMAT_UNKNOWN,
+      .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
+      .Buffer = {
+        .FirstElement = 0,
+        .NumElements = kParticleCount,
+        .StructureByteStride = sizeof(Particle),
+        .CounterOffsetInBytes = 0,
+        .Flags = D3D12_BUFFER_UAV_FLAG_NONE
+      }
+    };
+
+    m_device->CreateUnorderedAccessView(m_particlePool.Get(), nullptr, &uavDesc, m_particleSrvUavHeap->GetCPUDescriptorHandleForHeapStart());
 
     // Copy the triangle data to the vertex buffer.
-    UINT8* pVertexDataBegin;
+    UINT8* pVertexDataBegin = nullptr;
     CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
     COM_ERROR_IF_FAILED(m_vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin)), "Failed to map the vertex buffer.");
     memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices));
@@ -446,7 +552,12 @@ void D3D12HelloTriangle::OnKeyDown(UINT8 key)
       // terminal services or for some other unexpected reason.
       COM_ERROR_IF_FAILED(m_swapChain->SetFullscreenState(!fullscreen_state, nullptr), "Fullscreen transition failed.");
     }
+
+    break;
   }
+
+  default:
+    break;
 
   }
 }
@@ -455,9 +566,27 @@ void D3D12HelloTriangle::PopulateCommandList()
 {
   // Safe here because BeginFrame() waited on m_fenceValues[m_frameIndex].
   COM_ERROR_IF_FAILED(m_commandAllocators[m_frameIndex]->Reset(), "Failed to reset the command allocator.");
-  COM_ERROR_IF_FAILED(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), m_pipelineState.Get()), "Failed to reset the command list.");
+  COM_ERROR_IF_FAILED(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), nullptr), "Failed to reset the command list.");
 
-  // Set necessary state.
+  // Copy data from upload heap (filled by CPU) to Default Heap.
+  m_commandList->CopyResource(m_particlePool.Get(), m_particleUploadBuffer.Get());
+
+  // Change Default Heap (m_particlePool) from COPY_DEST to UNORDERED_ACCESS.
+  m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
+
+  // Compute pass.
+  ID3D12DescriptorHeap* ppHeaps[] = { m_particleSrvUavHeap.Get() };
+  m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
+
+  m_commandList->SetPipelineState(m_computePipelineState.Get());
+  m_commandList->SetComputeRootSignature(m_computeRootSignature.Get());
+  m_commandList->SetComputeRootDescriptorTable(0, m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
+
+  constexpr UINT threadGroupCountX = (kParticleCount + 255) / 256; // Round up NOT down.
+  m_commandList->Dispatch(threadGroupCountX, 1, 1);
+
+  // Graphics pass.
+  m_commandList->SetPipelineState(m_pipelineState.Get());
   m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
   m_commandList->RSSetViewports(1, &m_viewport);
   m_commandList->RSSetScissorRects(1, &m_scissorRect);

@@ -11,9 +11,13 @@ cmake --build "%BUILD_DIR%" --config Debug --target "%TARGET%"
 if errorlevel 1 (
   echo.
   echo Build failed.
+  pause
   exit /b 1
 )
 
 echo.
 echo Starting %TARGET%...
 "%EXE%"
+
+echo.
+echo Program exited with code: %ERRORLEVEL%

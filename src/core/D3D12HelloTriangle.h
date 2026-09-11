@@ -38,6 +38,8 @@ private:
   static constexpr UINT kBufferCount = 3;
   static constexpr UINT kFramesInFlight = 2;
 
+  static constexpr UINT kParticleCount = 500'000;
+
   struct Vertex
   {
     XMFLOAT3 position;
@@ -70,6 +72,27 @@ private:
   HANDLE m_frameLatencyWaitable;
   ComPtr<ID3D12Fence> m_fence;
   UINT64 m_fenceValues[kFramesInFlight];
+
+  // Particle system.
+  ComPtr<ID3D12DescriptorHeap> m_particleSrvUavHeap;
+  //UINT m_particleSrvUavDescriptorSize;
+
+  enum ParticleHeap : UINT 
+  {
+    PoolUAV = 0, // Compute shader updates the particles in this buffer.
+    Count
+  };
+
+  ComPtr<ID3D12RootSignature> m_computeRootSignature;
+  ComPtr<ID3D12PipelineState> m_computePipelineState;
+  ComPtr<ID3D12Resource> m_particleUploadBuffer; // Since Default Heap can't directly be written to from the CPU we use a upload heap.
+  ComPtr<ID3D12Resource> m_particlePool; // Pre-allocated structured buffer, to 'remove' dynamic memory allocations in GPU memory.
+
+  struct Particle
+  {
+    DirectX::XMFLOAT3 pos{};
+    float             _pad{};
+  };
 
   // Window state.
   bool m_windowVisible;

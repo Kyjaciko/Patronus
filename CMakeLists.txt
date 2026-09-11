@@ -152,6 +152,7 @@ add_custom_command(TARGET D3D12HelloTriangle POST_BUILD
 # shaders.hlsl itself.
 set(_hello_triangle_vs_cso "${CMAKE_BINARY_DIR}/$<CONFIG>/shaders_VSMain.cso")
 set(_hello_triangle_ps_cso "${CMAKE_BINARY_DIR}/$<CONFIG>/shaders_PSMain.cso")
+set(_particle_cs_cso "${CMAKE_BINARY_DIR}/$<CONFIG>/shaders_CSMain.cso")
 
 # Deliberately NOT using $<TARGET_FILE_DIR:D3D12HelloTriangle> for the
 # outputs above: since these custom commands' outputs are made a build
@@ -181,3 +182,15 @@ add_custom_command(
 )
 add_custom_target(D3D12HelloTriangleShaders DEPENDS "${_hello_triangle_vs_cso}" "${_hello_triangle_ps_cso}")
 add_dependencies(D3D12HelloTriangle D3D12HelloTriangleShaders)
+
+add_custom_command(
+  OUTPUT "${_particle_cs_cso}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/$<CONFIG>"
+  COMMAND "${PATRONUS_DXC_EXECUTABLE}" -T cs_6_6 -E CSMain
+          -Fo "${_particle_cs_cso}" "${CMAKE_SOURCE_DIR}/src/core/computeshader.hlsl"
+  DEPENDS "${CMAKE_SOURCE_DIR}/src/core/computeshader.hlsl"
+  COMMENT "Compiling computeshader.hlsl:CSMain (cs_6_6)"
+  VERBATIM
+)
+add_custom_target(ParticleShaders DEPENDS "${_particle_cs_cso}")
+add_dependencies(D3D12HelloTriangle ParticleShaders)
