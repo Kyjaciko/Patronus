@@ -6,7 +6,9 @@ barriers, descriptor management, a particle system, and a render graph.
 Windows, MSVC, C++20, HLSL Shader Model 6.6.
 
 <!-- TODO: hero GIF of the renderer running -->
-![Renderer demo](docs/media/demo-placeholder.png)
+![Triangle demo](docs/media/demo-placeholder.png)
+
+![Vertex pulling and billboarding demo](docs/media/Vertex%20Pulling%20%26%20billboarding.gif)
 
 ## Status
 

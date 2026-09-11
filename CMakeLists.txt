@@ -118,6 +118,7 @@ target_link_libraries(D3D12HelloTriangle PRIVATE
   dxguid.lib
   d3dcompiler.lib
   shell32.lib # CommandLineToArgvW, used in Win32Application.cpp
+  winmm
 )
 
 patronus_deploy_agility_sdk(D3D12HelloTriangle)
