@@ -13,6 +13,7 @@ D3D12HelloTriangle::D3D12HelloTriangle(UINT width, UINT height, std::wstring nam
   m_frameLatencyWaitable(nullptr),
   m_fenceValues{},
   m_camera(90.f, static_cast<float>(width) / static_cast<float>(height), 0.1f, 1000.f),
+  m_timer(),
   m_windowVisible(true),
   m_windowedMode(true)
 {
@@ -283,11 +284,12 @@ void D3D12HelloTriangle::LoadAssets()
     uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
 
     // Put the UAV descriptor into a root parameter and make it visible to the compute shader.
-    CD3DX12_ROOT_PARAMETER1 computeRootParameter;
-    computeRootParameter.InitAsDescriptorTable(1, &uavRange, D3D12_SHADER_VISIBILITY_ALL);
+    CD3DX12_ROOT_PARAMETER1 computeRootParameter[2];
+    computeRootParameter[0].InitAsConstants(2, 0, 0, D3D12_SHADER_VISIBILITY_ALL); // Bind particle count and delta time to root constant register 0.
+    computeRootParameter[1].InitAsDescriptorTable(1, &uavRange, D3D12_SHADER_VISIBILITY_ALL);
 
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC computeRootSignatureDesc;
-    computeRootSignatureDesc.Init_1_1(1, &computeRootParameter, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
+    computeRootSignatureDesc.Init_1_1(_countof(computeRootParameter), computeRootParameter, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
     ComPtr<ID3DBlob> signature;
     ComPtr<ID3DBlob> error;
@@ -393,8 +395,8 @@ void D3D12HelloTriangle::LoadAssets()
 
         pParticleDataBegin[i] = {
           .pos = { x, y, -5.f},
-          .vel = { 0.001f, 0.f, 0.f },
-          .lifetime = 1000.f
+          .vel = { 0.1f, 0.f, 0.f },
+          .lifetime = 10.f // Seconds.
         };
       }
 
@@ -493,6 +495,8 @@ void D3D12HelloTriangle::LoadAssets()
 // Update frame-based values.
 void D3D12HelloTriangle::OnUpdate()
 {
+  m_timer.Update();
+  m_particleSimConstants.deltaTime = static_cast<float>(m_timer.GetDeltaTime());
 }
 
 // Render the scene.
@@ -665,10 +669,6 @@ void D3D12HelloTriangle::PopulateCommandList()
   
     firstRun = true;
   }
-  // m_commandList->CopyResource(m_particlePool.Get(), m_particleUploadBuffer.Get());
-
-  // // Change Default Heap (m_particlePool) from COPY_DEST to UNORDERED_ACCESS.
-  // m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
 
   // Compute pass.
   ID3D12DescriptorHeap* ppHeaps[] = { m_particleSrvUavHeap.Get() };
@@ -679,7 +679,8 @@ void D3D12HelloTriangle::PopulateCommandList()
 
   m_commandList->SetPipelineState(m_computePipelineState.Get());
   m_commandList->SetComputeRootSignature(m_computeRootSignature.Get());
-  m_commandList->SetComputeRootDescriptorTable(0, uavHandle);
+  m_commandList->SetComputeRoot32BitConstants(0, 2, &m_particleSimConstants, 0);
+  m_commandList->SetComputeRootDescriptorTable(1, uavHandle);
 
   constexpr UINT threadGroupCountX = (kParticleCount + 255) / 256; // Round up NOT down.
   m_commandList->Dispatch(threadGroupCountX, 1, 1);

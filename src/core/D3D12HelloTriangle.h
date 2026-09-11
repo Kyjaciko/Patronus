@@ -3,6 +3,7 @@
 #include "DXSample.h"
 #include "COMException.h"
 
+#include "HPTimer.h"
 #include "Camera3D.h"
 
 using namespace DirectX;
@@ -120,6 +121,15 @@ private:
 
   // Check if 16 byte alignment is met.
   static_assert(sizeof(CameraCB) % 16 == 0);
+
+  struct SimulationConstants
+  {
+    float deltaTime{};
+    UINT particleCount{};
+  };
+
+  HPTimer m_timer;
+  SimulationConstants m_particleSimConstants{.particleCount = kParticleCount};
 
   // Window state.
   bool m_windowVisible;

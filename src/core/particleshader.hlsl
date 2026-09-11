@@ -47,7 +47,7 @@ VSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
   output.pos = mul(float4(worldPos, 1.f), gViewProj);
 
   float alpha = p.lifetime ? 1.f : 0.f; // Blend state still needs to be setup to work.
-  output.color = float4(1.f, saturate(p.lifetime / 1000.f), 0.5f, alpha); // 1000.f is starting value lifetime.
+  output.color = float4(1.f, saturate(p.lifetime / 10.f), 0.5f, alpha); // 10.f is starting value lifetime.
 
   return output;
 }
