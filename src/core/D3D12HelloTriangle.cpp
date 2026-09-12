@@ -395,7 +395,7 @@ void D3D12HelloTriangle::LoadAssets()
 
         pParticleDataBegin[i] = {
           .pos = { x, y, -5.f},
-          .vel = { 0.1f, 0.f, 0.f },
+          .vel = { 2.f, 5.f, 0.f },
           .lifetime = 10.f // Seconds.
         };
       }
@@ -715,6 +715,9 @@ void D3D12HelloTriangle::PopulateCommandList()
   m_commandList->SetGraphicsRootDescriptorTable(1, srvHandle);
   m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
   m_commandList->DrawInstanced(4, kParticleCount, 0, 0);
+
+  // Change Default Heap (m_particlePool) from SHADER_RESOURCE to UNORDERED_ACCESS.
+  m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
 
   // Indicate that the back buffer will now be used to present.
   m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_backBufferIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
