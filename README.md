@@ -10,6 +10,8 @@ Windows, MSVC, C++20, HLSL Shader Model 6.6.
 
 ![Vertex pulling and billboarding demo](docs/media/Vertex%20Pulling%20%26%20billboarding.gif)
 
+![Semi implicit Euler demo](docs\media\Semi_implicit_Euler.gif)
+
 ## Status
 
 Early scaffolding. No rendering yet — see `docs/devlog/` for progress notes
