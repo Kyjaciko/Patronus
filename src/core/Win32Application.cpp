@@ -126,6 +126,9 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
 {
   DXSample* pSample = reinterpret_cast<DXSample*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
 
+  Mouse* mouse = nullptr;
+  if(pSample) mouse = pSample->GetMouse();
+
   switch (message)
   {
   case WM_CREATE:
@@ -180,6 +183,101 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
   case WM_DESTROY:
     PostQuitMessage(0);
     return 0;
+
+  	////////////////////
+    // Mouse messages //
+    ////////////////////
+
+  case WM_LBUTTONDOWN:
+  {
+    int x = LOWORD(lParam);
+    int y = HIWORD(lParam);
+    mouse->OnLeftPress(x, y);
+    return 0;
+  }
+
+  case WM_LBUTTONUP:
+  {
+    int x = LOWORD(lParam);
+    int y = HIWORD(lParam);
+    mouse->OnLeftRelease(x, y);
+    return 0;
+  }
+
+  case WM_RBUTTONDOWN:
+  {
+    int x = LOWORD(lParam);
+    int y = HIWORD(lParam);
+    mouse->OnRightPress(x, y);
+    return 0;
+  }
+
+  case WM_RBUTTONUP:
+  {
+    int x = LOWORD(lParam);
+    int y = HIWORD(lParam);
+    mouse->OnRightRelease(x, y);
+    return 0;
+  }
+
+  case WM_MBUTTONDOWN:
+  {
+    int x = LOWORD(lParam);
+    int y = HIWORD(lParam);
+    mouse->OnMiddlePress(x, y);
+    return 0;
+  }
+
+  case WM_MBUTTONUP:
+  {
+    int x = LOWORD(lParam);
+    int y = HIWORD(lParam);
+    mouse->OnMiddleRelease(x, y);
+    return 0;
+  }
+
+  case WM_MOUSEWHEEL:
+  {
+    int x = LOWORD(lParam);
+    int y = HIWORD(lParam);
+    int wheel_delta = GET_WHEEL_DELTA_WPARAM(wParam);
+    if (wheel_delta > 0)
+      mouse->OnWheelUp(x, y);
+    else
+      mouse->OnWheelDown(x, y);
+    return 0;
+  }
+
+  case WM_MOUSEMOVE:
+  {
+    int x = LOWORD(lParam);
+    int y = HIWORD(lParam);
+    mouse->OnMouseMove(x, y);
+    return 0;
+  }
+
+  case WM_INPUT:
+  {
+    // Handle RAW input.
+    UINT data_size = sizeof(RAWINPUTHEADER);
+
+    GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, nullptr, &data_size, sizeof(RAWINPUTHEADER));
+    if (data_size > 0)
+    {
+      std::unique_ptr<BYTE[]> raw_data = std::make_unique<BYTE[]>(data_size);
+      if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, raw_data.get(), &data_size, sizeof(RAWINPUTHEADER)) == data_size)
+      {
+        RAWINPUT* raw_input = reinterpret_cast<RAWINPUT*>(raw_data.get());
+        if (raw_input->header.dwType == RIM_TYPEMOUSE)
+        {
+          mouse->OnMouseRawMove(raw_input->data.mouse.lLastX, raw_input->data.mouse.lLastY);
+        }
+      }
+    }
+
+    return DefWindowProc(hWnd, message, wParam, lParam);
+  }
+
   }
 
   // Handle any messages the switch statement didn't.

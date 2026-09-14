@@ -80,6 +80,8 @@ add_executable(D3D12HelloTriangle WIN32
   src/core/main.cpp
   src/core/stdafx.cpp
   src/core/DXSample.cpp
+  src/core/MouseEvent.cpp
+  src/core/Mouse.cpp
   src/core/Win32Application.cpp
   src/core/GameObject.cpp
   src/core/GameObject3D.cpp

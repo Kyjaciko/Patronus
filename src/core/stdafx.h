@@ -12,6 +12,7 @@
 #include <DirectXMath.h>
 #include "include/d3dx12/d3dx12.h"
 
+#include <memory>
 #include <string>
 #include <cassert>
 #include <wrl.h>

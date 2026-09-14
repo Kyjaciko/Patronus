@@ -7,13 +7,26 @@ DXSample::DXSample(UINT width, UINT height, std::wstring name) :
   m_width(width),
   m_height(height),
   m_title(name),
-  m_useWarpDevice(false)
+  m_useWarpDevice(false),
+  m_mouse(std::make_unique<Mouse>())
 {
   WCHAR assetsPath[512];
   GetAssetsPath(assetsPath, _countof(assetsPath));
   m_assetsPath = assetsPath;
 
   m_aspectRatio = static_cast<float>(width) / static_cast<float>(height);
+
+  RAWINPUTDEVICE raw_input_device{
+    .usUsagePage = 0x01,
+    .usUsage     = 0x02,    // Mouse.
+    .dwFlags	   = 0,
+    .hwndTarget  = nullptr  // No target window, so it follows keyboard focus.
+  };
+
+  if (RegisterRawInputDevices(&raw_input_device, 1, sizeof(raw_input_device)) == FALSE) 
+  {
+    COM_ERROR_IF_FAILED(E_FAIL, "Failed to register mouse as a raw input device.");
+  }
 }
 
 DXSample::~DXSample()
