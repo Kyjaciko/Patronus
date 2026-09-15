@@ -32,7 +32,7 @@ FIELD_MAX = np.array(
 #
 # Lower values:
 #   -> smoother, larger curls
-NOISE_SCALE = 0.18
+NOISE_SCALE = 0.85
 
 # Three independent noise fields.
 SEED_X = 12345

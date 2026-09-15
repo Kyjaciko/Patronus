@@ -279,17 +279,35 @@ void D3D12HelloTriangle::LoadAssets()
   }
 
   {
-    // Define one UAV slot at register u0 for the structured buffer (m_particlePool).
-    CD3DX12_DESCRIPTOR_RANGE1 uavRange;
-    uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
+    // Define one UAV slot at register u0 for the structured buffer (m_particlePool)
+    // and one SRV slot at register t0 for the curl noise texture.
+    CD3DX12_DESCRIPTOR_RANGE1 srvUavRange[2];
+    srvUavRange[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
+    srvUavRange[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
 
     // Put the UAV descriptor into a root parameter and make it visible to the compute shader.
     CD3DX12_ROOT_PARAMETER1 computeRootParameter[2];
     computeRootParameter[0].InitAsConstants(2, 0, 0, D3D12_SHADER_VISIBILITY_ALL); // Bind particle count and delta time to root constant register 0.
-    computeRootParameter[1].InitAsDescriptorTable(1, &uavRange, D3D12_SHADER_VISIBILITY_ALL);
+    computeRootParameter[1].InitAsDescriptorTable(2, srvUavRange, D3D12_SHADER_VISIBILITY_ALL);
+
+    D3D12_STATIC_SAMPLER_DESC sampler {
+      .Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+      .AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+      .AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+      .AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+      .MipLODBias = 0,
+      .MaxAnisotropy = 0,
+      .ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER,
+      .BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK,
+      .MinLOD = 0.f,
+      .MaxLOD = D3D12_FLOAT32_MAX,
+      .ShaderRegister = 0, // Register s0.
+      .RegisterSpace = 0,
+      .ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL
+    };
 
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC computeRootSignatureDesc;
-    computeRootSignatureDesc.Init_1_1(_countof(computeRootParameter), computeRootParameter, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
+    computeRootSignatureDesc.Init_1_1(_countof(computeRootParameter), computeRootParameter, 1, &sampler, D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
     ComPtr<ID3DBlob> signature;
     ComPtr<ID3DBlob> error;
@@ -321,7 +339,7 @@ void D3D12HelloTriangle::LoadAssets()
 
   // Command lists are created in the recording state, but there is nothing
   // to record yet. The main loop expects it to be closed, so close it now.
-  COM_ERROR_IF_FAILED(m_commandList->Close(), "Failed to close the command list.");
+  //COM_ERROR_IF_FAILED(m_commandList->Close(), "Failed to close the command list.");
 
   // Create the vertex buffer.
   {
@@ -382,7 +400,8 @@ void D3D12HelloTriangle::LoadAssets()
       CD3DX12_RANGE readRange(0, 0);
       COM_ERROR_IF_FAILED(m_particleUploadBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pParticleDataBegin)), "Failed to map the upload heap for the particle system.");
 
-      for (UINT i = 0; i < kParticleCount; ++i)
+      // Grid formation.
+      /*for (UINT i = 0; i < kParticleCount; ++i)
       {
         constexpr float spacing = 0.15f;
         constexpr UINT columns = 25;
@@ -395,12 +414,146 @@ void D3D12HelloTriangle::LoadAssets()
 
         pParticleDataBegin[i] = {
           .pos = { x, y, -5.f},
-          .vel = { 2.f, 5.f, 0.f },
+          .vel = { 0.f, 0.f, 0.f },
           .lifetime = 10.f // Seconds.
         };
+      }*/
+
+      // Random placement on a plane parallel to the XY-plane.
+      /*static std::mt19937 rng{ std::random_device{}() };
+
+      static constexpr float fovY = DirectX::XMConvertToRadians(90.f);
+      static constexpr float aspectRatio = 1280.f / 720.f;
+      static constexpr float z = 5.f;
+
+      static const float halfHeightWindow = z * std::tan(fovY * 0.5f);
+      static const float halfWidthWindow = halfHeightWindow * aspectRatio;
+
+      static std::uniform_real_distribution<float> distX(-halfWidthWindow, halfWidthWindow);
+      static std::uniform_real_distribution<float> distY(-halfHeightWindow, halfHeightWindow);
+
+      for (UINT i = 0; i < kParticleCount; ++i)
+      {
+        const float x = distX(rng);
+        const float y = distY(rng);
+
+        pParticleDataBegin[i] = {
+          .pos = { x, y, -z},
+          .vel = { 0.f, 0.f, 0.f },
+          .lifetime = 10.f // Seconds.
+        };
+      }*/
+
+      // Thin oval placement.
+      /*static std::mt19937 rng{ std::random_device{}() };
+
+      static constexpr XMFLOAT2 ovalRadius = { 7.f, 0.5f };
+      static constexpr float thickness = 0.25f;
+      static constexpr float z = 5.f;
+
+      static std::uniform_real_distribution<float> distAngle(0, DirectX::XM_2PI);
+      static std::uniform_real_distribution<float> distThickness(-thickness, thickness);
+
+      for (UINT i = 0; i < kParticleCount; ++i)
+      {
+        const float theta = distAngle(rng);
+        const float jitter = distThickness(rng);
+
+        const float x = (ovalRadius.x + jitter) * std::cos(theta);
+        const float y = (ovalRadius.y + jitter) * std::sin(theta);
+
+        pParticleDataBegin[i] = {
+          .pos = { x, y, -z},
+          .vel = { 0.f, 0.f, 0.f },
+          .lifetime = 10.f // Seconds.
+        };
+      }*/
+
+      // Uniformly distributed sphere placement,
+      // based on Deserno's method for equidistant points on a sphere (2004).
+      {
+        static std::mt19937 rng{ std::random_device{}() };
+
+        static constexpr XMFLOAT3 center = { 0.f, 0.f, 0.f };
+        static constexpr XMFLOAT3 axis = { 0.f, 1.f, 0.f };
+        static constexpr float radius = 5.f;
+
+        // Tilt axis around the z-axis.
+        const float angleRad = XMConvertToRadians(-30.f);
+        const XMVECTOR tiltedAxis = XMVector3Normalize(XMVector3TransformNormal(XMLoadFloat3(&axis), XMMatrixRotationZ(angleRad)));
+
+        XMFLOAT3 tiltedAxisFloat3;
+        XMStoreFloat3(&tiltedAxisFloat3, tiltedAxis);
+        
+        static std::uniform_real_distribution<float> distUnit(0.f, 1.f);
+
+        // See: Duff et al. (2017), "Building an Orthonormal Basis, Revisited"
+        constexpr auto BuildOrthonormalBasis = [](const XMFLOAT3& n) -> std::pair<XMFLOAT3, XMFLOAT3>
+        {
+          const float sign = std::copysignf(1.0f, n.z);
+          const float a = -1.0f / (sign + n.z);
+          const float b = n.x * n.y * a;
+
+          const XMFLOAT3 u{ 1.0f + sign * n.x * n.x * a, sign * b, -sign * n.x };
+          const XMFLOAT3 v{ b, sign + n.y * n.y * a, -n.y };
+
+          return { u, v };
+        };
+
+        const auto [u, v] = BuildOrthonormalBasis(tiltedAxisFloat3);
+        const XMVECTOR centerVec = XMLoadFloat3(&center);
+        const XMVECTOR uVec = XMLoadFloat3(&u);
+        const XMVECTOR vVec = XMLoadFloat3(&v);
+        const XMVECTOR nVec = XMLoadFloat3(&tiltedAxisFloat3);
+
+        // Determine the circle count the sphere is made out of.
+        const float N = static_cast<float>(kParticleCount);
+
+        const float areaPerParticle = (4.f * XM_PI * radius * radius) / N;
+        const float d = std::sqrt(areaPerParticle);
+
+        const float dTheta = XM_PI * radius / std::round(XM_PI * radius / d);
+        const float dPhi = areaPerParticle / dTheta;
+
+        const UINT ringCount = std::max<UINT>(1u, static_cast<UINT>(std::round(XM_PI * radius / dTheta)));
+        const float phaseOffsetGlobal = distUnit(rng) * XM_2PI;
+
+        UINT writeIndex = 0;
+        for (UINT i = 0; i < ringCount; ++i)
+        {
+          const float theta = XM_PI * (static_cast<float>(i) + 0.5f) / static_cast<float>(ringCount);
+          const float ringRadius = radius * std::sin(theta);
+          const float ringHeight = radius * std::cos(theta);
+
+          const float circumference = XM_2PI * ringRadius;
+          const UINT particlesInRing = std::max<UINT>(1u, static_cast<UINT>(std::round(circumference / dPhi)));
+
+          const float phaseOffset = phaseOffsetGlobal + distUnit(rng) * XM_2PI;
+
+          for (UINT j = 0; j < particlesInRing; ++j)
+          {
+            const float phi = phaseOffset + XM_2PI * static_cast<float>(j) / static_cast<float>(particlesInRing);
+
+            const float cosPhi = std::cos(phi);
+            const float sinPhi = std::sin(phi);
+
+            const XMVECTOR offset = XMVectorAdd(XMVectorScale(nVec, ringHeight), XMVectorAdd(XMVectorScale(uVec, ringRadius * cosPhi), XMVectorScale(vVec, ringRadius * sinPhi)));
+
+            XMFLOAT3 pos;
+            XMStoreFloat3(&pos, XMVectorAdd(centerVec, offset));
+
+            pParticleDataBegin[writeIndex++] = {
+              .pos = pos,
+              .vel = { 0.f, 0.f, 0.f },
+              .lifetime = 10.f // Seconds.
+            };
+          }
+        }
       }
 
       m_particleUploadBuffer->Unmap(0, nullptr);
+
+      m_camera.SetPosition(0.f, 0.f, 20.f);
     }
 
     // The constant buffer size (and in that regard also the address) needs to be a multiple of 256 bytes!
@@ -419,7 +572,7 @@ void D3D12HelloTriangle::LoadAssets()
     );
 
     {
-      CameraCB* pCameraDataBegin = nullptr;
+      /*CameraCB* pCameraDataBegin = nullptr;
       CD3DX12_RANGE readRange(0, 0);
       COM_ERROR_IF_FAILED(m_cameraCB->Map(0, &readRange, reinterpret_cast<void**>(&pCameraDataBegin)), "Failed to map the constant buffer that holds the camera data.");
 
@@ -428,7 +581,8 @@ void D3D12HelloTriangle::LoadAssets()
       pCameraDataBegin->billboardSize = 0.05f;
       DirectX::XMStoreFloat3(&pCameraDataBegin->camUp, m_camera.GetUpVector());
 
-      m_cameraCB->Unmap(0, nullptr);
+      m_cameraCB->Unmap(0, nullptr);*/
+      UpdateCameraCB();
     }
 
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc {
@@ -477,6 +631,100 @@ void D3D12HelloTriangle::LoadAssets()
     m_vertexBufferView.SizeInBytes = vertexBufferSize;
   }
 
+  // Create the curl noise texture.
+  {
+    // Describe and create a Texture3D.
+    D3D12_RESOURCE_DESC curlNoiseTextureDesc {
+      .Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE3D,
+      .Width = 64, // 64x64x64 is ideal, since this is only 2MB and will therefor be within the L2 cache.
+      .Height = 64,
+      .DepthOrArraySize = 64,
+      .MipLevels = 1,
+      .Format = DXGI_FORMAT_R16G16B16A16_FLOAT,
+      .SampleDesc = { .Count = 1, .Quality = 0 },
+      .Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN, // Let drivers optimize memory layout.
+      .Flags = D3D12_RESOURCE_FLAG_NONE
+    };
+
+    // Place the curl noise texture in the Default Heap.
+    COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+        D3D12_HEAP_FLAG_NONE,
+        &curlNoiseTextureDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST,
+        nullptr,
+        IID_PPV_ARGS(&m_curlNoiseTextureHeap)
+      ), 
+      "Failed to create the curl noise texture buffer."
+    );
+
+    UINT64 rawCurlNoiseSize = GetRequiredIntermediateSize(m_curlNoiseTextureHeap.Get(), 0, 1);
+
+    // Upload heap to write data to the Default Heap (curl noise texture).
+    COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+        D3D12_HEAP_FLAG_NONE,
+        &CD3DX12_RESOURCE_DESC::Buffer(rawCurlNoiseSize),
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&m_rawCurlNoiseDataHeap)
+      ), 
+      "Failed to create the raw curl noise (.bin) buffer."
+    );
+
+    // Copy raw curl noise data to upload heap.
+    {
+      // Read raw curl noise data from bin file.
+      m_rawCurlNoiseData.resize(rawCurlNoiseSize);
+      std::ifstream file("tools\\curl noise generator\\curl_noise_64x64x64_rgba16f_type2.bin", std::ios::binary);
+      if (!file.is_open()) COM_ERROR_IF_FAILED(E_FAIL, "Failed to read file: curl_noise_64x64x64_rgba16f_type2.bin.");
+      
+      // Get length of the bin file.
+      file.seekg(0, std::ios::end);
+      std::streamsize fileLength = file.tellg();
+      file.seekg(0, std::ios::beg);
+
+      // Data length of the bin file should match the size of the upload heap.
+      if (fileLength != static_cast<std::streamsize>(rawCurlNoiseSize)) COM_ERROR_IF_FAILED(E_FAIL, "Size of upload heap and curl noise raw data bin file don't match.");
+      file.read(reinterpret_cast<char*>(m_rawCurlNoiseData.data()), static_cast<std::streamsize>(m_rawCurlNoiseData.size()));
+      
+      if (!file) COM_ERROR_IF_FAILED(E_FAIL, "Failed to read raw curl noise data from bin file.");
+      file.close();
+
+      // Specifies the size of a single depth slice for UpdateSubresources.
+      D3D12_SUBRESOURCE_DATA curlNoiseTextureData {
+        .pData = m_rawCurlNoiseData.data(),
+        .RowPitch = static_cast<LONG_PTR>(curlNoiseTextureDesc.Width * kTexturePixelSize),
+        .SlicePitch = static_cast<LONG_PTR>(curlNoiseTextureData.RowPitch * curlNoiseTextureDesc.Height)
+      };
+
+      // UpdateSubresources makes sure we obey the 256 byte aligment.
+      UpdateSubresources(m_commandList.Get(), m_curlNoiseTextureHeap.Get(), m_rawCurlNoiseDataHeap.Get(), 0, 0, 1, &curlNoiseTextureData);
+      m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_curlNoiseTextureHeap.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
+
+      // Create the SRV for the curl noise texture.
+      D3D12_SHADER_RESOURCE_VIEW_DESC srvCurlNoiseDesc {
+        .Format = curlNoiseTextureDesc.Format,
+        .ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D,
+        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        .Texture3D = {
+          .MostDetailedMip = 0,
+          .MipLevels = curlNoiseTextureDesc.MipLevels,
+          .ResourceMinLODClamp = 0.f
+        }
+      };
+
+      CD3DX12_CPU_DESCRIPTOR_HANDLE particleHeap(m_particleSrvUavHeap->GetCPUDescriptorHandleForHeapStart());
+      CD3DX12_CPU_DESCRIPTOR_HANDLE srvCurlNoiseHandle(particleHeap, ParticleHeap::CurlNoiseSRV, m_particleSrvUavDescriptorSize);
+      m_device->CreateShaderResourceView(m_curlNoiseTextureHeap.Get(), &srvCurlNoiseDesc, srvCurlNoiseHandle);
+    }
+  }
+
+  // Close the command list and execute it to begin the initial GPU setup.
+  COM_ERROR_IF_FAILED(m_commandList->Close(), "Failed to close the command list.");
+  ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
+  m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+
   // Create synchronization objects and wait until assets have been uploaded to the GPU.
   {
     COM_ERROR_IF_FAILED(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)), "Failed to create fence");
@@ -497,6 +745,29 @@ void D3D12HelloTriangle::OnUpdate()
 {
   m_timer.Update();
   m_particleSimConstants.deltaTime = static_cast<float>(m_timer.GetDeltaTime());
+
+  // Camera rotation tracks mouse movement while right button is held.
+  while (!m_mouse->IsEventBufferEmpty())
+  {
+    MouseEvent event = m_mouse->ReadEvent();
+    if (m_mouse->IsRightPressed() && event.GetEventType() == MouseEvent::EventType::RAW_MOVE)
+    {
+      static constexpr float sensitivity = 0.001f;
+      static constexpr float maxPitch    = XM_PIDIV2 - 0.01f;
+
+      m_camera.AdjustRotation(
+        static_cast<float>(event.GetPosY()) * sensitivity,
+        static_cast<float>(event.GetPosX()) * sensitivity, 
+        0.f
+      );
+
+      // Avoid going upside down.
+      XMFLOAT3 cameraRotation = m_camera.GetRotationFloat3();
+      m_camera.SetRotation(std::clamp(cameraRotation.x, -maxPitch, maxPitch), cameraRotation.y, cameraRotation.z);
+
+      UpdateCameraCB();
+    }
+  }
 }
 
 // Render the scene.
@@ -618,8 +889,24 @@ void D3D12HelloTriangle::OnDestroy()
   CloseHandle(m_frameLatencyWaitable);
 }
 
+void D3D12HelloTriangle::UpdateCameraCB()
+{
+  CameraCB* pCameraDataBegin = nullptr;
+  CD3DX12_RANGE readRange(0, 0);
+  COM_ERROR_IF_FAILED(m_cameraCB->Map(0, &readRange, reinterpret_cast<void**>(&pCameraDataBegin)), "Failed to map the constant buffer that holds the camera data.");
+
+  DirectX::XMStoreFloat4x4(&pCameraDataBegin->viewProj, m_camera.GetViewMatrix() * m_camera.GetProjectionMatrix());
+  DirectX::XMStoreFloat3(&pCameraDataBegin->camRight, m_camera.GetRightVector());
+  pCameraDataBegin->billboardSize = 0.05f;
+  DirectX::XMStoreFloat3(&pCameraDataBegin->camUp, m_camera.GetUpVector());
+
+  m_cameraCB->Unmap(0, nullptr);
+}
+
 void D3D12HelloTriangle::OnKeyDown(UINT8 key)
 {
+  float cameraSpeed = 10.f;
+
   switch (key)
   {
 
@@ -645,6 +932,36 @@ void D3D12HelloTriangle::OnKeyDown(UINT8 key)
 
     break;
   }
+
+  case VK_UP:
+    m_camera.AdjustPosition(m_camera.GetForwardVector() * cameraSpeed * m_particleSimConstants.deltaTime);
+    UpdateCameraCB();
+    break;
+
+  case VK_DOWN:
+    m_camera.AdjustPosition(m_camera.GetBackwardVector() * cameraSpeed * m_particleSimConstants.deltaTime);
+    UpdateCameraCB();
+    break;
+
+  case VK_LEFT:
+    m_camera.AdjustPosition(m_camera.GetLeftVector() * cameraSpeed * m_particleSimConstants.deltaTime);
+    UpdateCameraCB();
+    break;
+
+  case VK_RIGHT:
+    m_camera.AdjustPosition(m_camera.GetRightVector() * cameraSpeed * m_particleSimConstants.deltaTime);
+    UpdateCameraCB();
+    break;
+
+  case VK_SHIFT:
+    m_camera.AdjustPosition(0.f, cameraSpeed * m_particleSimConstants.deltaTime, 0.f);
+    UpdateCameraCB();
+    break;
+
+  case VK_CONTROL:
+    m_camera.AdjustPosition(0.f, -cameraSpeed * m_particleSimConstants.deltaTime, 0.f);
+    UpdateCameraCB();
+    break;
 
   default:
     break;

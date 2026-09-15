@@ -1,0 +1,38 @@
+{
+    "format": "DXGI_FORMAT_R16G16B16A16_FLOAT",
+    "width": 64,
+    "height": 64,
+    "depth": 64,
+    "channels": {
+        "R": "Vx",
+        "G": "Vy",
+        "B": "Vz",
+        "A": 0.0
+    },
+    "array_order": "[z, y, x, channel]",
+    "world_space_min": [
+        -10.0,
+        -10.0,
+        -10.0
+    ],
+    "world_space_max": [
+        10.0,
+        10.0,
+        10.0
+    ],
+    "grid_spacing": [
+        0.3174603283405304,
+        0.3174603283405304,
+        0.3174603283405304
+    ],
+    "epsilon": 0.3174603283405304,
+    "noise_scale": 0.85,
+    "seeds": {
+        "x": 12345,
+        "y": 67890,
+        "z": 13579
+    },
+    "field_strength": 1.0,
+    "normalization_percentile": 99.0,
+    "normalization_scale": 0.4161897386003881
+}

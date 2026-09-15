@@ -12,6 +12,10 @@ Windows, MSVC, C++20, HLSL Shader Model 6.6.
 
 ![Semi implicit Euler demo](docs/media/Semi_implicit_Euler.gif)
 
+![3D curl noise](docs/media/3D_curl_noise_no_center_attracting_force.gif)
+
+![3D curl noise with attracting center force](docs/media/3D_curl_noise_with_attracting_center_force_orb_effect.gif)
+
 ## Status
 
 Early scaffolding. No rendering yet — see `docs/devlog/` for progress notes

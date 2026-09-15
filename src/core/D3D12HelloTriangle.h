@@ -1,5 +1,9 @@
 #pragma once
 
+#include <vector>
+#include <fstream>
+#include <random>
+
 #include "DXSample.h"
 #include "COMException.h"
 
@@ -30,18 +34,19 @@ protected:
   void OnKeyDown(UINT8 key) override;
 
 private:
-  // Two independent numbers, deliberately not shared:
+  // Two independent numbers, not shared:
   //
   // kBufferCount    — swapchain surfaces. One is on screen, one is queued for
   //                   the next flip, one is free to render into. Three keeps
   //                   Present from blocking when a frame runs long.
-  // kFramesInFlight — how far the CPU may run ahead of the GPU. Bounds input
-  //                   latency and sizes the per-frame resources (command
-  //                   allocators, fence values). Nothing to do with surfaces.
+  // kFramesInFlight — how far the CPU may run ahead of the GPU.
+  //
   static constexpr UINT kBufferCount = 3;
   static constexpr UINT kFramesInFlight = 2;
 
-  static constexpr UINT kParticleCount = 500;
+  static constexpr UINT kParticleCount = 1'000'000;
+
+  static constexpr UINT kTexturePixelSize = 8; // DXGI_FORMAT_R16G16B16A16_FLOAT = 8 bytes
 
   struct Vertex
   {
@@ -82,9 +87,9 @@ private:
 
   enum ParticleHeap : UINT 
   {
-    PoolUAV = 0, // Compute shader updates the particles in this buffer.
-    PoolSRV, // Vertex shader creates 4 vertices per index.
-    //CameraCb,
+    PoolUAV = 0, // Compute shader reads and updates the particles in this buffer.
+    CurlNoiseSRV, // Must immediately follow PoolUAV because the compute root signature (see srvUavRange) expects u0 and t0 to be contiguous in the descriptor table.
+    PoolSRV, // Vertex shader reads the particle data from this buffer.
     Count
   };
 
@@ -130,6 +135,12 @@ private:
 
   HPTimer m_timer;
   SimulationConstants m_particleSimConstants{.particleCount = kParticleCount};
+
+  std::vector<UINT8> m_rawCurlNoiseData{};
+  ComPtr<ID3D12Resource> m_rawCurlNoiseDataHeap;
+  ComPtr<ID3D12Resource> m_curlNoiseTextureHeap;
+
+  void UpdateCameraCB();
 
   // Window state.
   bool m_windowVisible;
