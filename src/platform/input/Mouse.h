@@ -1,7 +1,7 @@
 #pragma once
 
 #include <queue>
-#include "stdafx.h"
+#include "../../core/stdafx.h"
 #include "MouseEvent.h"
 
 class Mouse

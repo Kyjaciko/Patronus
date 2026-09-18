@@ -19,6 +19,11 @@ D3D12HelloTriangle::D3D12HelloTriangle(UINT width, UINT height, std::wstring nam
 {
 }
 
+D3D12HelloTriangle::~D3D12HelloTriangle()
+{
+
+}
+
 void D3D12HelloTriangle::OnInit()
 {
   LoadPipeline();
@@ -560,29 +565,20 @@ void D3D12HelloTriangle::LoadAssets()
     static constexpr UINT cameraSizeCB = (sizeof(CameraCB) + D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT - 1) & ~(D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT - 1);
 
     // Copy camera data to constant buffer for particle system.
-    COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
-        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-        D3D12_HEAP_FLAG_NONE,
-        &CD3DX12_RESOURCE_DESC::Buffer(cameraSizeCB),
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&m_cameraCB)
-      ), 
-      "Failed to create the vertex buffer."
-    );
-
+    for (std::ptrdiff_t i = 0; i < _countof(m_cameraCB); ++i)
     {
-      /*CameraCB* pCameraDataBegin = nullptr;
-      CD3DX12_RANGE readRange(0, 0);
-      COM_ERROR_IF_FAILED(m_cameraCB->Map(0, &readRange, reinterpret_cast<void**>(&pCameraDataBegin)), "Failed to map the constant buffer that holds the camera data.");
+      COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+          &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+          D3D12_HEAP_FLAG_NONE,
+          &CD3DX12_RESOURCE_DESC::Buffer(cameraSizeCB),
+          D3D12_RESOURCE_STATE_GENERIC_READ,
+          nullptr,
+          IID_PPV_ARGS(&m_cameraCB[i])
+        ), 
+        L"Failed to create the camera constant buffer at index: " + std::to_wstring(i) + L"."
+      );
 
-      DirectX::XMStoreFloat4x4(&pCameraDataBegin->viewProj, m_camera.GetViewMatrix() * m_camera.GetProjectionMatrix());
-      DirectX::XMStoreFloat3(&pCameraDataBegin->camRight, m_camera.GetRightVector());
-      pCameraDataBegin->billboardSize = 0.05f;
-      DirectX::XMStoreFloat3(&pCameraDataBegin->camUp, m_camera.GetUpVector());
-
-      m_cameraCB->Unmap(0, nullptr);*/
-      UpdateCameraCB();
+      UpdateCameraCB(m_cameraCB[i]);
     }
 
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc {
@@ -676,7 +672,7 @@ void D3D12HelloTriangle::LoadAssets()
     {
       // Read raw curl noise data from bin file.
       m_rawCurlNoiseData.resize(rawCurlNoiseSize);
-      std::ifstream file("tools\\curl noise generator\\curl_noise_64x64x64_rgba16f_type2.bin", std::ios::binary);
+      std::ifstream file(L"tools/curl noise generator/curl_noise_64x64x64_rgba16f_type2.bin", std::ios::binary);
       if (!file.is_open()) COM_ERROR_IF_FAILED(E_FAIL, "Failed to read file: curl_noise_64x64x64_rgba16f_type2.bin.");
       
       // Get length of the bin file.
@@ -765,7 +761,7 @@ void D3D12HelloTriangle::OnUpdate()
       XMFLOAT3 cameraRotation = m_camera.GetRotationFloat3();
       m_camera.SetRotation(std::clamp(cameraRotation.x, -maxPitch, maxPitch), cameraRotation.y, cameraRotation.z);
 
-      UpdateCameraCB();
+      UpdateCameraCB(m_cameraCB[m_frameIndex]);
     }
   }
 }
@@ -889,18 +885,18 @@ void D3D12HelloTriangle::OnDestroy()
   CloseHandle(m_frameLatencyWaitable);
 }
 
-void D3D12HelloTriangle::UpdateCameraCB()
+void D3D12HelloTriangle::UpdateCameraCB(const ComPtr<ID3D12Resource>& camera_constant_buffer)
 {
   CameraCB* pCameraDataBegin = nullptr;
   CD3DX12_RANGE readRange(0, 0);
-  COM_ERROR_IF_FAILED(m_cameraCB->Map(0, &readRange, reinterpret_cast<void**>(&pCameraDataBegin)), "Failed to map the constant buffer that holds the camera data.");
+  COM_ERROR_IF_FAILED(camera_constant_buffer->Map(0, &readRange, reinterpret_cast<void**>(&pCameraDataBegin)), "Failed to map the constant buffer that holds the camera data.");
 
   DirectX::XMStoreFloat4x4(&pCameraDataBegin->viewProj, m_camera.GetViewMatrix() * m_camera.GetProjectionMatrix());
   DirectX::XMStoreFloat3(&pCameraDataBegin->camRight, m_camera.GetRightVector());
   pCameraDataBegin->billboardSize = 0.05f;
   DirectX::XMStoreFloat3(&pCameraDataBegin->camUp, m_camera.GetUpVector());
 
-  m_cameraCB->Unmap(0, nullptr);
+  camera_constant_buffer->Unmap(0, nullptr);
 }
 
 void D3D12HelloTriangle::OnKeyDown(UINT8 key)
@@ -935,32 +931,26 @@ void D3D12HelloTriangle::OnKeyDown(UINT8 key)
 
   case VK_UP:
     m_camera.AdjustPosition(m_camera.GetForwardVector() * cameraSpeed * m_particleSimConstants.deltaTime);
-    UpdateCameraCB();
     break;
 
   case VK_DOWN:
     m_camera.AdjustPosition(m_camera.GetBackwardVector() * cameraSpeed * m_particleSimConstants.deltaTime);
-    UpdateCameraCB();
     break;
 
   case VK_LEFT:
     m_camera.AdjustPosition(m_camera.GetLeftVector() * cameraSpeed * m_particleSimConstants.deltaTime);
-    UpdateCameraCB();
     break;
 
   case VK_RIGHT:
     m_camera.AdjustPosition(m_camera.GetRightVector() * cameraSpeed * m_particleSimConstants.deltaTime);
-    UpdateCameraCB();
     break;
 
   case VK_SHIFT:
     m_camera.AdjustPosition(0.f, cameraSpeed * m_particleSimConstants.deltaTime, 0.f);
-    UpdateCameraCB();
     break;
 
   case VK_CONTROL:
     m_camera.AdjustPosition(0.f, -cameraSpeed * m_particleSimConstants.deltaTime, 0.f);
-    UpdateCameraCB();
     break;
 
   default:
@@ -1027,7 +1017,7 @@ void D3D12HelloTriangle::PopulateCommandList()
   // Draw particles.
   m_commandList->SetPipelineState(m_particlePipelineState.Get());
   //m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
-  m_commandList->SetGraphicsRootConstantBufferView(0, m_cameraCB->GetGPUVirtualAddress());
+  m_commandList->SetGraphicsRootConstantBufferView(0, m_cameraCB[m_frameIndex]->GetGPUVirtualAddress());
   CD3DX12_GPU_DESCRIPTOR_HANDLE srvHandle(particleHeap, ParticleHeap::PoolSRV, m_particleSrvUavDescriptorSize);
   m_commandList->SetGraphicsRootDescriptorTable(1, srvHandle);
   m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);

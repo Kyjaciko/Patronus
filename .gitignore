@@ -47,6 +47,16 @@ ipch/
 !.vscode/tasks.json
 !.vscode/launch.json
 
+# Python tooling (tools/)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Benchmark runs: raw CSVs are per-machine measurements, not source.
+# Commit only the summarised tables/plots you want in the README.
+/benchmarks/runs/
+
 # Misc
 *.tmp
 *.bak

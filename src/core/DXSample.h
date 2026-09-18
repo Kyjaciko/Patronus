@@ -2,7 +2,7 @@
 
 #include "DXSampleHelper.h"
 #include "Win32Application.h"
-#include "Mouse.h"
+#include "../platform/input/Mouse.h"
 
 class DXSample
 {

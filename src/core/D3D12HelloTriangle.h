@@ -23,6 +23,7 @@ class D3D12HelloTriangle : public DXSample
 {
 public:
   D3D12HelloTriangle(UINT width, UINT height, std::wstring name);
+  ~D3D12HelloTriangle();
 
 protected:
   void OnInit() override;
@@ -98,7 +99,7 @@ private:
   ComPtr<ID3D12PipelineState> m_computePipelineState;
   ComPtr<ID3D12Resource> m_particleUploadBuffer; // Since Default Heap can't directly be written to from the CPU we use a upload heap.
   ComPtr<ID3D12Resource> m_particlePool; // Pre-allocated structured buffer, to 'remove' dynamic memory allocations in GPU memory.
-  ComPtr<ID3D12Resource> m_cameraCB; // Should have a constant buffer per frame in flight.
+  ComPtr<ID3D12Resource> m_cameraCB[kFramesInFlight]; // Should have a constant buffer per frame in flight.
   Camera3D m_camera;
 
   struct Particle
@@ -140,7 +141,8 @@ private:
   ComPtr<ID3D12Resource> m_rawCurlNoiseDataHeap;
   ComPtr<ID3D12Resource> m_curlNoiseTextureHeap;
 
-  void UpdateCameraCB();
+  void UpdateCamera();
+  void UpdateCameraCB(const ComPtr<ID3D12Resource>& camera_constant_buffer);
 
   // Window state.
   bool m_windowVisible;
