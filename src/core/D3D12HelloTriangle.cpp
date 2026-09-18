@@ -742,6 +742,57 @@ void D3D12HelloTriangle::OnUpdate()
   m_timer.Update();
   m_particleSimConstants.deltaTime = static_cast<float>(m_timer.GetDeltaTime());
 
+  // Autorepeat is off, the character is queued once per physical press.
+  while (!m_keyboard->IsCharBufferEmpty())
+  {
+    unsigned char character = m_keyboard->ReadChar();
+
+    if (character == '&')
+    {
+      if (m_tearingSupport)
+      {
+        Win32Application::ToggleFullscreenWindow(m_swapChain.Get());
+      }
+      else
+      {
+        BOOL fullscreen_state = FALSE;
+        COM_ERROR_IF_FAILED(m_swapChain->GetFullscreenState(&fullscreen_state, nullptr), "Failed to obtain fullscreen state from the swap chain.");
+        
+        // Transitions to fullscreen mode can fail when running apps over
+        // terminal services or for some other unexpected reason.
+        COM_ERROR_IF_FAILED(m_swapChain->SetFullscreenState(!fullscreen_state, nullptr), "Fullscreen transition failed.");
+      }
+    }
+  }
+
+  // Autorepeat is off, one KEY_DOWN per physical press.
+  while (!m_keyboard->IsKeyBufferEmpty())
+  {
+    KeyboardEvent event = m_keyboard->ReadKey();
+    unsigned char key = event.GetKey();
+
+    // Instrument TAB to toggle between fullscreen states.
+    // The window message loop callback will receive a WM_SIZE message once the
+    // window is in the fullscreen state. At that point, the IDXGISwapChain should
+    // be resized to match the new window size
+    if (key == VK_TAB && event.IsPressed())
+    {
+      if (m_tearingSupport)
+      {
+        Win32Application::ToggleFullscreenWindow(m_swapChain.Get());
+      }
+      else
+      {
+        BOOL fullscreen_state = FALSE;
+        COM_ERROR_IF_FAILED(m_swapChain->GetFullscreenState(&fullscreen_state, nullptr), "Failed to obtain fullscreen state from the swap chain.");
+        
+        // Transitions to fullscreen mode can fail when running apps over
+        // terminal services or for some other unexpected reason.
+        COM_ERROR_IF_FAILED(m_swapChain->SetFullscreenState(!fullscreen_state, nullptr), "Fullscreen transition failed.");
+      }
+    }
+  }
+
   // Camera rotation tracks mouse movement while right button is held.
   while (!m_mouse->IsEventBufferEmpty())
   {
@@ -760,10 +811,25 @@ void D3D12HelloTriangle::OnUpdate()
       // Avoid going upside down.
       XMFLOAT3 cameraRotation = m_camera.GetRotationFloat3();
       m_camera.SetRotation(std::clamp(cameraRotation.x, -maxPitch, maxPitch), cameraRotation.y, cameraRotation.z);
-
-      UpdateCameraCB(m_cameraCB[m_frameIndex]);
     }
   }
+
+  // Key state is sampled every frame.
+  float cameraSpeed = 10.f;
+  if (m_keyboard->IsKeyPressed(VK_SPACE))
+		cameraSpeed = 100.0f;
+  if (m_keyboard->IsKeyPressed('Z'))
+    m_camera.AdjustPosition(m_camera.GetForwardVector() * cameraSpeed * m_particleSimConstants.deltaTime);
+  if (m_keyboard->IsKeyPressed('S'))
+    m_camera.AdjustPosition(m_camera.GetBackwardVector() * cameraSpeed * m_particleSimConstants.deltaTime);
+  if (m_keyboard->IsKeyPressed('Q'))
+    m_camera.AdjustPosition(m_camera.GetLeftVector() * cameraSpeed * m_particleSimConstants.deltaTime);
+  if (m_keyboard->IsKeyPressed('D'))
+    m_camera.AdjustPosition(m_camera.GetRightVector() * cameraSpeed * m_particleSimConstants.deltaTime);
+  if (m_keyboard->IsKeyPressed(VK_SHIFT))
+    m_camera.AdjustPosition(0.f, cameraSpeed * m_particleSimConstants.deltaTime, 0.f);
+  if (m_keyboard->IsKeyPressed(VK_CONTROL))
+    m_camera.AdjustPosition(0.f, -cameraSpeed * m_particleSimConstants.deltaTime, 0.f);
 }
 
 // Render the scene.
@@ -773,6 +839,10 @@ void D3D12HelloTriangle::OnRender()
     return;
 
   BeginFrame();
+
+  // Must be after BeginFrame() 'cause if we're waiting on the fence the GPU is handling frame N-2 
+  // and we would otherwise write to the same CB the GPU is reading from.
+  UpdateCameraCB(m_cameraCB[m_frameIndex]);
 
   // Record all the commands we need to render the scene into the command list.
   PopulateCommandList();
@@ -897,66 +967,6 @@ void D3D12HelloTriangle::UpdateCameraCB(const ComPtr<ID3D12Resource>& camera_con
   DirectX::XMStoreFloat3(&pCameraDataBegin->camUp, m_camera.GetUpVector());
 
   camera_constant_buffer->Unmap(0, nullptr);
-}
-
-void D3D12HelloTriangle::OnKeyDown(UINT8 key)
-{
-  float cameraSpeed = 10.f;
-
-  switch (key)
-  {
-
-  // Instrument the Space Bar to toggle between fullscreen states.
-  // The window message loop callback will receive a WM_SIZE message once the
-  // window is in the fullscreen state. At that point, the IDXGISwapChain should
-  // be resized to match the new window size
-  case VK_SPACE:
-  {
-    if (m_tearingSupport)
-    {
-      Win32Application::ToggleFullscreenWindow(m_swapChain.Get());
-    }
-    else
-    {
-      BOOL fullscreen_state = FALSE;
-      COM_ERROR_IF_FAILED(m_swapChain->GetFullscreenState(&fullscreen_state, nullptr), "Failed to obtain fullscreen state from the swap chain.");
-      
-      // Transitions to fullscreen mode can fail when running apps over
-      // terminal services or for some other unexpected reason.
-      COM_ERROR_IF_FAILED(m_swapChain->SetFullscreenState(!fullscreen_state, nullptr), "Fullscreen transition failed.");
-    }
-
-    break;
-  }
-
-  case VK_UP:
-    m_camera.AdjustPosition(m_camera.GetForwardVector() * cameraSpeed * m_particleSimConstants.deltaTime);
-    break;
-
-  case VK_DOWN:
-    m_camera.AdjustPosition(m_camera.GetBackwardVector() * cameraSpeed * m_particleSimConstants.deltaTime);
-    break;
-
-  case VK_LEFT:
-    m_camera.AdjustPosition(m_camera.GetLeftVector() * cameraSpeed * m_particleSimConstants.deltaTime);
-    break;
-
-  case VK_RIGHT:
-    m_camera.AdjustPosition(m_camera.GetRightVector() * cameraSpeed * m_particleSimConstants.deltaTime);
-    break;
-
-  case VK_SHIFT:
-    m_camera.AdjustPosition(0.f, cameraSpeed * m_particleSimConstants.deltaTime, 0.f);
-    break;
-
-  case VK_CONTROL:
-    m_camera.AdjustPosition(0.f, -cameraSpeed * m_particleSimConstants.deltaTime, 0.f);
-    break;
-
-  default:
-    break;
-
-  }
 }
 
 void D3D12HelloTriangle::PopulateCommandList()

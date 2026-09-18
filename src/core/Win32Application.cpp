@@ -127,7 +127,12 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
   DXSample* pSample = reinterpret_cast<DXSample*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
 
   Mouse* mouse = nullptr;
-  if(pSample) mouse = pSample->GetMouse();
+  Keyboard* keyboard = nullptr;
+  if (pSample) 
+  {
+    mouse = pSample->GetMouse();
+    keyboard = pSample->GetKeyboard();
+  }
 
   switch (message)
   {
@@ -139,27 +144,59 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
     }
     return 0;
 
-  case WM_KEYDOWN:
-    if (pSample)
-    {
-      pSample->OnKeyDown(static_cast<UINT8>(wParam));
-    }
-    return 0;
-
-  case WM_KEYUP:
-    if (pSample)
-    {
-      pSample->OnKeyUp(static_cast<UINT8>(wParam));
-    }
-    return 0;
-
   case WM_PAINT:
-    if (pSample)
+    if (pSample && mouse && keyboard)
     {
       pSample->OnUpdate();
       pSample->OnRender();
     }
     return 0;
+
+    ///////////////////////
+    // Keyboard messages //
+    ///////////////////////
+
+  case WM_KEYDOWN:
+  {
+    if (!keyboard)
+      return 0;
+    
+    unsigned char key = static_cast<unsigned char>(wParam);
+    if (keyboard->AreKeysAutoRepeat())
+      keyboard->OnKeyPress(key);
+    else
+    {
+      const bool was_pressed = lParam & 0x40000000; // Has been pressed before? Check bit 30.
+      if (!was_pressed) keyboard->OnKeyPress(key);
+    }
+    return 0;
+  }
+
+  case WM_KEYUP:
+  {
+    if (!keyboard)
+      return 0;
+    
+    unsigned char key = static_cast<unsigned char>(wParam);
+    keyboard->OnKeyRelease(key);
+    return 0;
+  }
+
+  case WM_CHAR:
+  {
+    if (!keyboard)
+      return 0;
+    
+    unsigned char character = static_cast<unsigned char>(wParam);
+    if (keyboard->AreCharsAutoRepeat()) 
+      keyboard->OnChar(character);
+    else
+    {
+      const bool was_pressed = lParam & 0x40000000;  // Has been pressed before? Check bit 30.
+      if (!was_pressed) keyboard->OnChar(character);
+    }
+    return 0;
+  }
 
   // If the window is continously resized WM_SIZE is called numerous amount of times
   // which will cause the swap chain to lag behind. WM_EXITSIZEMOVE is not an option either
@@ -190,6 +227,9 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
 
   case WM_LBUTTONDOWN:
   {
+    if (!mouse)
+      return 0;
+    
     int x = LOWORD(lParam);
     int y = HIWORD(lParam);
     mouse->OnLeftPress(x, y);
@@ -198,6 +238,9 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
 
   case WM_LBUTTONUP:
   {
+    if (!mouse)
+      return 0;
+    
     int x = LOWORD(lParam);
     int y = HIWORD(lParam);
     mouse->OnLeftRelease(x, y);
@@ -206,6 +249,9 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
 
   case WM_RBUTTONDOWN:
   {
+    if (!mouse)
+      return 0;
+    
     int x = LOWORD(lParam);
     int y = HIWORD(lParam);
     mouse->OnRightPress(x, y);
@@ -214,6 +260,9 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
 
   case WM_RBUTTONUP:
   {
+    if (!mouse)
+      return 0;
+    
     int x = LOWORD(lParam);
     int y = HIWORD(lParam);
     mouse->OnRightRelease(x, y);
@@ -222,6 +271,9 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
 
   case WM_MBUTTONDOWN:
   {
+    if (!mouse)
+      return 0;
+    
     int x = LOWORD(lParam);
     int y = HIWORD(lParam);
     mouse->OnMiddlePress(x, y);
@@ -230,6 +282,9 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
 
   case WM_MBUTTONUP:
   {
+    if (!mouse)
+      return 0;
+    
     int x = LOWORD(lParam);
     int y = HIWORD(lParam);
     mouse->OnMiddleRelease(x, y);
@@ -238,6 +293,9 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
 
   case WM_MOUSEWHEEL:
   {
+    if (!mouse)
+      return 0;
+    
     int x = LOWORD(lParam);
     int y = HIWORD(lParam);
     int wheel_delta = GET_WHEEL_DELTA_WPARAM(wParam);
@@ -250,6 +308,9 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
 
   case WM_MOUSEMOVE:
   {
+    if (!mouse)
+      return 0;
+    
     int x = LOWORD(lParam);
     int y = HIWORD(lParam);
     mouse->OnMouseMove(x, y);
@@ -258,6 +319,9 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
 
   case WM_INPUT:
   {
+    if (!mouse)
+      return DefWindowProc(hWnd, message, wParam, lParam);
+
     // Handle RAW input.
     UINT data_size = sizeof(RAWINPUTHEADER);
 

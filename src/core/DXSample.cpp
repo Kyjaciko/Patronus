@@ -8,7 +8,8 @@ DXSample::DXSample(UINT width, UINT height, std::wstring name) :
   m_height(height),
   m_title(name),
   m_useWarpDevice(false),
-  m_mouse(std::make_unique<Mouse>())
+  m_mouse(std::make_unique<Mouse>()),
+  m_keyboard(std::make_unique<Keyboard>())
 {
   WCHAR assetsPath[512];
   GetAssetsPath(assetsPath, _countof(assetsPath));

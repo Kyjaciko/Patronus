@@ -32,8 +32,6 @@ protected:
   void OnSizeChanged(UINT width, UINT height, bool minimized) override;
   void OnDestroy() override;
 
-  void OnKeyDown(UINT8 key) override;
-
 private:
   // Two independent numbers, not shared:
   //
@@ -99,7 +97,7 @@ private:
   ComPtr<ID3D12PipelineState> m_computePipelineState;
   ComPtr<ID3D12Resource> m_particleUploadBuffer; // Since Default Heap can't directly be written to from the CPU we use a upload heap.
   ComPtr<ID3D12Resource> m_particlePool; // Pre-allocated structured buffer, to 'remove' dynamic memory allocations in GPU memory.
-  ComPtr<ID3D12Resource> m_cameraCB[kFramesInFlight]; // Should have a constant buffer per frame in flight.
+  ComPtr<ID3D12Resource> m_cameraCB[kFramesInFlight];
   Camera3D m_camera;
 
   struct Particle

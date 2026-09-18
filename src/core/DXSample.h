@@ -3,6 +3,7 @@
 #include "DXSampleHelper.h"
 #include "Win32Application.h"
 #include "../platform/input/Mouse.h"
+#include "../platform/input/Keyboard.h"
 
 class DXSample
 {
@@ -16,15 +17,12 @@ public:
   virtual void OnSizeChanged(UINT width, UINT height, bool minimized) = 0;
   virtual void OnDestroy() = 0;
 
-  // Samples override the event handlers to handle specific messages.
-  virtual void OnKeyDown(UINT8 /*key*/) {}
-  virtual void OnKeyUp(UINT8 /*key*/) {}
-
   // Accessors.
   UINT GetWidth() const           { return m_width; }
   UINT GetHeight() const          { return m_height; }
   const WCHAR* GetTitle() const   { return m_title.c_str(); }
   Mouse* GetMouse() const         { return m_mouse.get(); }
+  Keyboard* GetKeyboard() const   { return m_keyboard.get(); }
 
   void ParseCommandLineArgs(_In_reads_(argc) WCHAR* argv[], int argc);
 
@@ -51,6 +49,7 @@ protected:
   bool m_useWarpDevice;
 
   std::unique_ptr<Mouse> m_mouse;
+  std::unique_ptr<Keyboard> m_keyboard;
 
 private:
   // Root assets path.
