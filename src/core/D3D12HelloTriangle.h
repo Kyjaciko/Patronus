@@ -47,6 +47,8 @@ private:
 
   static constexpr UINT kTexturePixelSize = 8; // DXGI_FORMAT_R16G16B16A16_FLOAT = 8 bytes
 
+  static constexpr float kMaxDeltaTime = .1f;
+
   struct Vertex
   {
     XMFLOAT3 position;

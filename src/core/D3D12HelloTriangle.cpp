@@ -740,7 +740,7 @@ void D3D12HelloTriangle::LoadAssets()
 void D3D12HelloTriangle::OnUpdate()
 {
   m_timer.Update();
-  m_particleSimConstants.deltaTime = static_cast<float>(m_timer.GetDeltaTime());
+  m_particleSimConstants.deltaTime = std::min(static_cast<float>(m_timer.GetDeltaTime()), kMaxDeltaTime);
 
   // Autorepeat is off, the character is queued once per physical press.
   while (!m_keyboard->IsCharBufferEmpty())
