@@ -63,6 +63,32 @@ target_link_libraries(PatronusSmokeTest PRIVATE
 
 patronus_deploy_agility_sdk(PatronusSmokeTest)
 
+# --- Profiling: frame timing log ----------------------------------------
+# Harness plumbing (Claude-owned per CLAUDE.md): the sink that turns
+# (frame, zone, ms) samples into the CSV tools/bench/bench_report.py reads.
+# The GPU timestamp queries that produce the samples live in the renderer
+# and are hand-written. Its own library so the test can link it without the
+# app. Headers are included as "profiling/<name>.h" from the src/ root.
+add_library(patronus_profiling STATIC
+  src/profiling/FrameTimingWriter.cpp
+)
+
+target_include_directories(patronus_profiling PUBLIC src)
+
+target_link_libraries(patronus_profiling PRIVATE patronus_warnings)
+
+# --- Tests --------------------------------------------------------------
+# Framework-free C++ tests live under tests/, mirroring the src/ layout,
+# one executable per module. CI runs them next to the smoke test.
+add_executable(PatronusFrameTimingWriterTest
+  tests/profiling/FrameTimingWriterTest.cpp
+)
+
+target_link_libraries(PatronusFrameTimingWriterTest PRIVATE
+  patronus_profiling
+  patronus_warnings
+)
+
 # --- D3D12HelloTriangle -------------------------------------------------
 # Microsoft's sample from DirectX-Graphics-Samples, copied into src/core/ by
 # the user for learning purposes -- not written or modified by Claude
@@ -105,6 +131,11 @@ target_compile_definitions(D3D12HelloTriangle PRIVATE
   UNICODE
   _UNICODE
   NOMINMAX
+  # The build configuration as a string literal, for the "config=" metadata
+  # line of the benchmark CSV (tools/bench/README.md). Visual Studio is a
+  # multi-config generator, so this has to be a generator expression;
+  # CMAKE_BUILD_TYPE is empty here. CMake escapes the quotes for MSVC.
+  PATRONUS_BUILD_CONFIG="$<CONFIG>"
 )
 
 target_include_directories(D3D12HelloTriangle PRIVATE
@@ -117,6 +148,7 @@ target_include_directories(D3D12HelloTriangle PRIVATE
 )
 
 target_link_libraries(D3D12HelloTriangle PRIVATE
+  patronus_profiling
   d3d12.lib
   dxgi.lib
   dxguid.lib

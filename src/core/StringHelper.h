@@ -12,6 +12,12 @@ public:
 		return wide_string;
 	}
 
+	static std::string WideToString(const std::wstring& w_str)
+	{
+		std::string string(w_str.begin(), w_str.end());
+		return string;
+	}
+
 	static std::string GetDirectoryFromPath(const std::string& filePath)
 	{
 		size_t off_1 = filePath.find_last_of('\\');

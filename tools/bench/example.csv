@@ -1,0 +1,67 @@
+# synthetic=true
+# note=example data for tools/bench/bench_report.py, not a measurement
+# gpu=example
+# config=RelWithDebInfo
+# resolution=1920x1080
+# particles=1000000
+frame,zone,ms
+0,sim,0.520
+0,draw,2.410
+0,frame,3.210
+1,sim,0.415
+1,draw,1.950
+1,frame,2.610
+2,sim,0.412
+2,draw,1.930
+2,frame,2.590
+3,sim,0.418
+3,draw,1.945
+3,frame,2.605
+4,sim,0.410
+4,draw,1.925
+4,frame,2.580
+5,sim,0.414
+5,draw,1.940
+5,frame,2.600
+6,sim,0.470
+6,draw,2.310
+6,frame,3.020
+7,sim,0.411
+7,draw,1.935
+7,frame,2.590
+8,sim,0.413
+8,draw,1.928
+8,frame,2.585
+9,sim,0.416
+9,draw,1.942
+9,frame,2.602
+10,sim,0.409
+10,draw,1.921
+10,frame,2.575
+11,sim,0.412
+11,draw,1.933
+11,frame,2.590
+12,sim,0.417
+12,draw,1.948
+12,frame,2.610
+13,sim,0.410
+13,draw,1.926
+13,frame,2.581
+14,sim,0.415
+14,draw,1.939
+14,frame,2.599
+15,sim,0.413
+15,draw,1.930
+15,frame,2.588
+16,sim,0.411
+16,draw,1.927
+16,frame,2.583
+17,sim,0.419
+17,draw,1.951
+17,frame,2.615
+18,sim,0.412
+18,draw,1.934
+18,frame,2.591
+19,sim,0.414
+19,draw,1.937
+19,frame,2.596

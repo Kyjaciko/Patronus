@@ -9,6 +9,8 @@
 
 #include "HPTimer.h"
 #include "Camera3D.h"
+#include "Utils.h"
+#include "profiling/FrameTimingWriter.h"
 
 using namespace DirectX;
 
@@ -49,6 +51,12 @@ private:
 
   static constexpr float kMaxDeltaTime = .1f;
 
+  static constexpr UINT kZonesPerFrame = 3; // Zone layout within 1 frame:
+                                            // 0 = frame         1 = sim         2 = render
+  static constexpr UINT kSlotsPerFrame = 6; // Slot layout within 1 frame:
+                                            // 0 = frame begin   1 = sim begin   2 = sim end
+                                            // 3 = render begin  4 = render end  5 = frame end
+
   struct Vertex
   {
     XMFLOAT3 position;
@@ -58,6 +66,7 @@ private:
   // Pipeline objects.
   CD3DX12_VIEWPORT m_viewport;
   CD3DX12_RECT m_scissorRect;
+  ComPtr<IDXGIAdapter1> m_hardwareAdapter;
   ComPtr<IDXGISwapChain3> m_swapChain;
   ComPtr<ID3D12Device> m_device;
   ComPtr<ID3D12Resource> m_renderTargets[kBufferCount];
@@ -140,8 +149,25 @@ private:
   ComPtr<ID3D12Resource> m_rawCurlNoiseDataHeap;
   ComPtr<ID3D12Resource> m_curlNoiseTextureHeap;
 
-  void UpdateCamera();
+  // Timestamp queries for measuring GPU time.
+  ComPtr<ID3D12QueryHeap> m_timestampQueryHeap;
+  ComPtr<ID3D12Resource> m_timestampQueryResult;
+  UINT64 m_timestampFrequency;
+  UINT64 m_frameNumber;
+  patronus::profiling::FrameTimingWriter m_timestampWriter;
+
+  enum TimestampSlots : UINT
+  {
+    FRAME_BEGIN = 0,
+    SIM_BEGIN,
+    SIM_END,
+    RENDER_BEGIN,
+    RENDER_END,
+    FRAME_END
+  };
+
   void UpdateCameraCB(const ComPtr<ID3D12Resource>& camera_constant_buffer);
+  void ReadTimestamps();
 
   // Window state.
   bool m_windowVisible;

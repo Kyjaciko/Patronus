@@ -47,9 +47,14 @@ VSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
 {
   VSOutput output;
 
-  Particle p = gParticles[instanceID];
+  // DrawInstanced(4, kParticleCount, 0, 0).
+  //Particle p = gParticles[instanceID];
+  //float2 corner = QuadCorners[vertexID];
 
-  float2 corner = QuadCorners[vertexID];
+  // DrawIndexedInstanced(6 * kParticleCount, 1, 0, 0, 0).
+  Particle p = gParticles[vertexID / 4];
+  float2 corner = QuadCorners[vertexID % 4];
+
   float3 worldPos = p.pos
                     + gCamRight * corner.x * gBillboardSize
                     + gCamUp    * corner.y * gBillboardSize;

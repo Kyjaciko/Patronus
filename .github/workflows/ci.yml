@@ -43,6 +43,15 @@ jobs:
             throw "Smoke test exited with code $LASTEXITCODE"
           }
 
+      # Framework-free C++ tests from tests/ (one executable per module).
+      - name: Run C++ tests
+        shell: pwsh
+        run: |
+          & "build/${{ matrix.configuration }}/PatronusFrameTimingLogTest.exe"
+          if ($LASTEXITCODE -ne 0) {
+            throw "FrameTimingLog test exited with code $LASTEXITCODE"
+          }
+
   format-check:
     # Same windows-2022 pin as the build job -- keeps clang-format on this
     # runner at the version this project's formatting was actually verified

@@ -42,7 +42,7 @@ protected:
   float m_aspectRatio;
 
   // Whether or not tearing is available for fullscreen borderless windowed mode.
-  bool m_VSync = true;
+  bool m_VSync = false;
   BOOL m_tearingSupport = FALSE;
 
   // Adapter info.

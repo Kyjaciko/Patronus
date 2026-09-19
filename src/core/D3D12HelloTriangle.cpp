@@ -14,6 +14,7 @@ D3D12HelloTriangle::D3D12HelloTriangle(UINT width, UINT height, std::wstring nam
   m_fenceValues{},
   m_camera(90.f, static_cast<float>(width) / static_cast<float>(height), 0.1f, 1000.f),
   m_timer(),
+  m_frameNumber(0),
   m_windowVisible(true),
   m_windowedMode(true)
 {
@@ -21,7 +22,7 @@ D3D12HelloTriangle::D3D12HelloTriangle(UINT width, UINT height, std::wstring nam
 
 D3D12HelloTriangle::~D3D12HelloTriangle()
 {
-
+  m_timestampLogger.Close();
 }
 
 void D3D12HelloTriangle::OnInit()
@@ -68,11 +69,10 @@ void D3D12HelloTriangle::LoadPipeline()
   }
   else
   {
-    ComPtr<IDXGIAdapter1> hardwareAdapter;
-    GetHardwareAdapter(factory.Get(), &hardwareAdapter);
+    GetHardwareAdapter(factory.Get(), &m_hardwareAdapter);
 
     COM_ERROR_IF_FAILED(D3D12CreateDevice(
-        hardwareAdapter.Get(),
+        m_hardwareAdapter.Get(),
         D3D_FEATURE_LEVEL_12_2,
         IID_PPV_ARGS(&m_device)
       ), 
@@ -96,6 +96,7 @@ void D3D12HelloTriangle::LoadPipeline()
   };
 
   COM_ERROR_IF_FAILED(m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue)), "Failed to create the command queue.");
+  COM_ERROR_IF_FAILED(m_commandQueue->GetTimestampFrequency(&m_timestampFrequency), "Failed to fetch the GPU timestamp counter frequency.");
 
   COM_ERROR_IF_FAILED(factory->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &m_tearingSupport, sizeof(m_tearingSupport)), "Failed to check for hardware feature support.");
 
@@ -726,6 +727,29 @@ void D3D12HelloTriangle::LoadAssets()
   ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
   m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
+  // Create the timestamps readback buffer.
+  {
+    D3D12_QUERY_HEAP_DESC timestampQueryHeapDesc {
+      .Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP,
+      .Count = kFramesInFlight * kSlotsPerFrame,
+      .NodeMask = 0
+    };
+    COM_ERROR_IF_FAILED(m_device->CreateQueryHeap(&timestampQueryHeapDesc, IID_PPV_ARGS(&m_timestampQueryHeap)), "Failed to create the timestamp query heap.");
+
+    static const UINT timestampQueryHeapSize = timestampQueryHeapDesc.Count * sizeof(UINT64);
+
+    COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK),
+        D3D12_HEAP_FLAG_NONE,
+        &CD3DX12_RESOURCE_DESC::Buffer(timestampQueryHeapSize),
+        D3D12_RESOURCE_STATE_COPY_DEST,
+        nullptr,
+        IID_PPV_ARGS(&m_timestampQueryResult)
+      ), 
+      L"Failed to create the timestamp readback buffer."
+    );
+  }
+
   // Create synchronization objects and wait until assets have been uploaded to the GPU.
   {
     COM_ERROR_IF_FAILED(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)), "Failed to create fence");
@@ -738,6 +762,24 @@ void D3D12HelloTriangle::LoadAssets()
     }
 
     WaitForGpu();
+  }
+
+  // Start logging the GPU timestamps to a CSV file.
+  {
+    // Get adapter name.
+    DXGI_ADAPTER_DESC1 adapterDesc;
+    m_hardwareAdapter->GetDesc1(&adapterDesc);
+
+    patronus::profiling::FrameTimingWriter::Metadata metadata {
+      {"gpu", StringHelper::WideToString(adapterDesc.Description)},
+      {"config", PATRONUS_BUILD_CONFIG},
+      {"resolution", std::to_string(m_width) + "x" + std::to_string(m_height)},
+      {"particles", std::to_string(kParticleCount)},
+      {"note", "Curl noise ORB using DrawIndexedInstanced(6N, 1)"}
+    };
+    
+    if (!m_timestampWriter.IsOpen())
+      m_timestampWriter.Open("benchmarks/runs/gpu_timestamps_curl_noise_drawindexedinstanced_6N_1.csv", metadata);
   }
 
   // Release the raw curl noise data, since it's now on the GPU (in the default heap).
@@ -799,6 +841,10 @@ void D3D12HelloTriangle::OnUpdate()
         // terminal services or for some other unexpected reason.
         COM_ERROR_IF_FAILED(m_swapChain->SetFullscreenState(!fullscreen_state, nullptr), "Fullscreen transition failed.");
       }
+    }
+    else if (key == 'V' && event.IsPressed())
+    {
+      m_VSync = !m_VSync;
     }
   }
 
@@ -980,9 +1026,13 @@ void D3D12HelloTriangle::UpdateCameraCB(const ComPtr<ID3D12Resource>& camera_con
 
 void D3D12HelloTriangle::PopulateCommandList()
 {
+  const UINT queryBase = m_frameIndex * kSlotsPerFrame;
+
   // Safe here because BeginFrame() waited on m_fenceValues[m_frameIndex].
   COM_ERROR_IF_FAILED(m_commandAllocators[m_frameIndex]->Reset(), "Failed to reset the command allocator.");
   COM_ERROR_IF_FAILED(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), nullptr), "Failed to reset the command list.");
+
+  m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::FRAME_BEGIN);
 
   // Compute pass.
   ID3D12DescriptorHeap* ppHeaps[] = { m_particleSrvUavHeap.Get() };
@@ -997,7 +1047,9 @@ void D3D12HelloTriangle::PopulateCommandList()
   m_commandList->SetComputeRootDescriptorTable(1, uavHandle);
 
   constexpr UINT threadGroupCountX = (kParticleCount + 255) / 256; // Round up NOT down.
+  m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::SIM_BEGIN);
   m_commandList->Dispatch(threadGroupCountX, 1, 1);
+  m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::SIM_END);
 
   // Change Default Heap (m_particlePool) from UNORDERED_ACCESS to SHADER_RESOURCE.
   m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
@@ -1014,27 +1066,38 @@ void D3D12HelloTriangle::PopulateCommandList()
   CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_backBufferIndex, m_rtvDescriptorSize);
   m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-  // Draw triangle.
+  // Render triangle.
   const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
   m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
   m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
   m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
   m_commandList->DrawInstanced(3, 1, 0, 0);
 
-  // Draw particles.
+  // Render particles.
   m_commandList->SetPipelineState(m_particlePipelineState.Get());
   //m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
   m_commandList->SetGraphicsRootConstantBufferView(0, m_cameraCB[m_frameIndex]->GetGPUVirtualAddress());
   CD3DX12_GPU_DESCRIPTOR_HANDLE srvHandle(particleHeap, ParticleHeap::PoolSRV, m_particleSrvUavDescriptorSize);
   m_commandList->SetGraphicsRootDescriptorTable(1, srvHandle);
-  m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-  m_commandList->DrawInstanced(4, kParticleCount, 0, 0);
+  //m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+  m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // DrawIndexedInstanced()
+  m_commandList->IASetIndexBuffer(&m_indexBufferView); // DrawIndexedInstanced()
+  m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::RENDER_BEGIN);
+  //m_commandList->DrawInstanced(4, kParticleCount, 0, 0);
+  m_commandList->DrawIndexedInstanced(6 * kParticleCount, 1, 0, 0, 0);
+  m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::RENDER_END);
+
+  // Render Dear ImGui.
+  ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
 
   // Change Default Heap (m_particlePool) from SHADER_RESOURCE to UNORDERED_ACCESS.
   m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
 
   // Indicate that the back buffer will now be used to present.
   m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_backBufferIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+
+  m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::FRAME_END);
+  m_commandList->ResolveQueryData(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase, kSlotsPerFrame, m_timestampQueryResult.Get(), static_cast<UINT64>(queryBase) * sizeof(UINT64));
 
   COM_ERROR_IF_FAILED(m_commandList->Close(), "Failed to close the command list.");
 }
@@ -1051,6 +1114,34 @@ void D3D12HelloTriangle::WaitForGpu()
   }
 }
 
+void D3D12HelloTriangle::ReadTimestamps()
+{
+  if (m_frameNumber < kFramesInFlight)
+    return;
+
+  // Determine where to start and end reading, since it's a readback buffer.
+  const UINT queryBase = m_frameIndex * kSlotsPerFrame;
+  const SIZE_T byteBegin = static_cast<SIZE_T>(queryBase) * sizeof(UINT64);
+  const SIZE_T byteEnd = byteBegin + static_cast<SIZE_T>(kSlotsPerFrame) * sizeof(UINT64);
+
+  UINT64* mappedSlots = nullptr;
+  CD3DX12_RANGE readRange(byteBegin, byteEnd);
+  COM_ERROR_IF_FAILED(m_timestampQueryResult->Map(0, &readRange, reinterpret_cast<void**>(&mappedSlots)), "Failed to map the buffer that holds the query time stamps.");
+
+  const UINT64* slots = mappedSlots + queryBase;
+
+  double msFrame  = patronus::utils::TicksToMilliseconds(slots[TimestampSlots::FRAME_BEGIN], slots[TimestampSlots::FRAME_END], m_timestampFrequency);
+  double msSim    = patronus::utils::TicksToMilliseconds(slots[TimestampSlots::SIM_BEGIN], slots[TimestampSlots::SIM_END], m_timestampFrequency);
+  double msRender = patronus::utils::TicksToMilliseconds(slots[TimestampSlots::RENDER_BEGIN], slots[TimestampSlots::RENDER_END], m_timestampFrequency);
+
+  CD3DX12_RANGE writeRange(0, 0);
+  m_timestampQueryResult->Unmap(0, &writeRange);
+
+  m_timestampWriter.Add(m_frameNumber - kFramesInFlight, "frame", msFrame);
+  m_timestampWriter.Add(m_frameNumber - kFramesInFlight, "sim", msSim);
+  m_timestampWriter.Add(m_frameNumber - kFramesInFlight, "render", msRender);
+}
+
 void D3D12HelloTriangle::BeginFrame()
 {
   // Wait until a new frame can be queued (no more than kFramesInFlight amount of Present() calls can be in DXGI's present-queue).
@@ -1062,6 +1153,8 @@ void D3D12HelloTriangle::BeginFrame()
     COM_ERROR_IF_FAILED(m_fence->SetEventOnCompletion(m_fenceValues[m_frameIndex], m_fenceEvent), "Failed to set fence completion event.");
     WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
   }
+
+  ReadTimestamps();
 
   m_backBufferIndex = m_swapChain->GetCurrentBackBufferIndex();
 
@@ -1089,4 +1182,6 @@ void D3D12HelloTriangle::EndFrame()
   COM_ERROR_IF_FAILED(m_commandQueue->Signal(m_fence.Get(), m_fenceValues[m_frameIndex]), "Failed to signal command queue fence.");
 
   m_frameIndex = (m_frameIndex + 1) % kFramesInFlight;
+
+  ++m_frameNumber;
 }
