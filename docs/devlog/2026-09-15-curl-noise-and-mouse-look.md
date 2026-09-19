@@ -98,3 +98,30 @@ are, which matters once the cursor would otherwise hit the edge of the
 window during a fast look. Pitch is clamped to just under ±90°
 (`XM_PIDIV2 - 0.01f`) after each update to stop the camera from flipping
 upside down.
+
+## Addendum (2026-09-17): which bake is used, and why it was replaced
+
+Two baked volumes were committed: `curl_noise_64x64x64_rgba16f` with
+`NOISE_SCALE = 0.18` and `..._type2` with `0.85`. The shader loads
+`type2`. At 0.18 the potential varies about once across the whole 20-unit
+box, so the curl is one or two large swirls and the orb reads as a slow
+rotation; at 0.85 there are several curls per axis and the shell gets the
+turbulent surface in the hero gif. The first bake was kept for comparison
+and should be deleted once the loader moves to the new asset.
+
+The generator itself has been superseded by `tools/bake_curl_noise.py`
+for reasons found in the 2026-09-17 review:
+
+- The field was not periodic (plain noise over a linear range, one-sided
+  differences at the edges) but the sampler used `WRAP`, and the orb band
+  (radius 7.5 to 12.5) extends past the +/-10 box, so many particles
+  sampled across a discontinuity every frame.
+- The alpha channel was written as 0 and fetched anyway.
+- The world bounds lived twice: in the tool's JSON and hardcoded in the
+  shader.
+
+The new bake generates noise on a periodic lattice with a wrapping curl
+stencil (verified divergence-free to float precision), puts a scalar
+fractal noise in alpha, and emits a `.json` and a constexpr `.h` so the
+dimensions and tile size are read, not retyped. Output:
+`assets/noise/curl_noise_64_rgba16f.*`, deployed next to the exe.

@@ -295,3 +295,41 @@ project and F5 it) rather than more guessing on my end. Since this is
 vendored sample code under the CLAUDE.md hard rule, the actual fix (once
 identified) needs to happen on the CMake/environment side, not by editing
 `D3D12HelloTriangle.cpp`.
+## Addendum (2026-08-09): the crash, found
+
+The "builds, does not yet run" status above was resolved two commits later,
+and the two build-side fixes described earlier turned out to be half right.
+
+**Root cause: Agility SDK version mismatch.** The sample as Microsoft ships
+it embeds its own exports:
+
+```cpp
+extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 618; }
+extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\D3D12\\"; }
+```
+
+`D3D12SDKVersion` is how the D3D12 loader decides which `D3D12Core.dll` in
+`D3D12SDKPath` it is allowed to use. The project fetches and deploys 619
+(`cmake/FetchAgilitySDK.cmake`), so `D3D12CreateDevice` refused the
+redistributable and returned `0x887E0003` (`D3D12_ERROR_INVALID_REDIST`).
+That HRESULT was the "unhandled exception" from `ThrowIfFailed`.
+
+Two things made it findable:
+
+1. `ThrowIfFailed` was replaced by `COM_ERROR_IF_FAILED` (see ADR-0008),
+   which shows the HRESULT text and the failing call site in a message box
+   instead of throwing. The first message box named the call and the code.
+2. The "duplicate Agility SDK export" fix above was backwards. Not linking
+   `src/rhi/AgilitySDKExports.cpp` avoided the duplicate-symbol error but
+   left the sample's hardcoded 618 in charge. The correct fix was the
+   opposite: delete the sample's two export lines and link the project's
+   single definition, so exactly one export exists and it is the one the
+   CMake fetch pins. `CMakeLists.txt` documents this next to the target.
+
+Lesson recorded for interviews: the Agility SDK version is a contract
+between three places (the fetch script, the deployed DLL folder, and the
+exported constant in the exe), and any two agreeing is not enough.
+
+**Also stale above:** the vs_5_1/ps_5_1 profiles were replaced by SM 6.6
+for every stage on 2026-09-17 (`cmake/CompileShaders.cmake`), and shaders
+now live in `shaders/`.

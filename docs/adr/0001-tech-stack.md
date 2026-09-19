@@ -73,6 +73,10 @@ builds matter more here than always being on the bleeding edge.
 
 ## Consequences
 
+- The device is created at `D3D_FEATURE_LEVEL_12_2`, not the sample's
+  11_0; that decision and its hardware implications are in ADR-0009.
+  Error handling for failed API calls is in ADR-0008.
+
 - No cross-platform portability; a Vulkan or Metal backend would need a
   real RHI abstraction layer this project deliberately doesn't have.
 - Every machine that builds this needs network access at configure time

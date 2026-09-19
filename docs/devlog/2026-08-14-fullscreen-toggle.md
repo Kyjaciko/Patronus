@@ -74,3 +74,39 @@ or `Present`/`ResizeBuffers` fail elsewhere, `COM_ERROR_IF_FAILED`
 terminates the process immediately (`exit(-1)`) without running this
 cleanup path — a real (if narrow) way to still leave fullscreen state
 dangling. Not fixed yet.
+
+## Follow-up (2026-09-05): resize, vsync and a real index bug
+
+Commit "Fix minor issues" was small but three of its changes are decisions
+rather than tidying, and one is a bug fix that matters for ADR-0002:
+
+- **Index bug.** `OnSizeChanged` re-fetched the back buffer index into
+  `m_frameIndex` instead of `m_backBufferIndex`. With
+  `kFramesInFlight = 2` and `kBufferCount = 3` that can put a value of 2
+  into an index that addresses two-element arrays (command allocators,
+  fence values). It is exactly the failure mode ADR-0002 introduced the
+  two indices to avoid, and it survived because a resize was rarely
+  tested. Fixed.
+- **Vsync flag.** `Present` now takes one of two paths: `Present(1, 0)`
+  when `m_VSync` is true (the default), or `Present(0,
+  DXGI_PRESENT_ALLOW_TEARING)` when supported and windowed. There is no
+  runtime toggle yet; it is a member you flip in code. For benchmarking
+  (see `tools/bench/README.md`) vsync must be off, so a key or ImGui
+  toggle is on the M0 list in `docs/roadmap.md`.
+- **Resize storms are accepted, not fixed.** Dragging a window edge fires
+  `WM_SIZE` continuously and each one runs the full flush-release-resize
+  sequence above, so the swap chain lags the window. `WM_EXITSIZEMOVE`
+  does not help because it is not sent for maximise or the fullscreen
+  toggle. The pragmatic choice was `DXGI_SCALING_STRETCH` (was
+  `DXGI_SCALING_NONE`, which had been set only to make resize bugs
+  visible) so the lag is at least not ugly. The structural fix is a
+  dedicated render thread decoupled from the message pump; deferred, and
+  recorded as a comment in `Win32Application.cpp` next to `WM_SIZE`.
+- Small things: the window title shows the current client size after a
+  resize, and `ToggleFullscreenWindow` returns on a null swap chain instead
+  of asserting.
+
+**Known gap, restated.** The exit-time `SetFullscreenState(FALSE)` is
+still skipped whenever `COM_ERROR_IF_FAILED` terminates the process. That
+is a consequence of the fail-fast error policy, now written down in
+ADR-0008 rather than only in a code comment.

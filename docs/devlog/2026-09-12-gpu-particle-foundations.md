@@ -21,10 +21,15 @@ struct Particle
 };
 ```
 
-(`computeshader.hlsl`, `particleshader.hlsl`). `_pad` exists because
-`float3` is 12 bytes but HLSL packs structured-buffer elements on 16-byte
-boundaries — without it, `pos`/`vel`/`lifetime` would straddle a boundary
-inconsistently between how the CPU writes it and how HLSL indexes it.
+(`computeshader.hlsl`, `particleshader.hlsl`). `_pad` brings the stride to
+32 bytes. *Correction (2026-09-17):* an earlier version of this entry
+claimed HLSL packs structured-buffer elements on 16-byte boundaries. It
+does not — that rule applies to constant buffers. Structured buffers use
+C-like scalar alignment, so without the pad the stride would be a perfectly
+legal 28 bytes and the CPU struct would still match. The pad is kept for a
+different reason: a 32-byte stride is 16-byte aligned, which lets the
+compiler issue vectorised 16-byte loads and fits exactly two particles per
+64-byte cache line.
 
 The same buffer is bound twice, as two different view types, to two
 different shader stages:

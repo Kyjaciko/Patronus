@@ -111,13 +111,21 @@ that slot was last used.
 CPU and GPU now overlap. Frame time is the maximum of the two rather than
 their sum.
 
-Not yet handled, deferred to a later milestone:
+Follow-ups, with status as of 2026-09-17:
 
-- swapchain resize (`m_renderTargets` and the RTVs become invalid)
-- `DXGI_ERROR_DEVICE_REMOVED` from `Present` or `ExecuteCommandLists`
-- fullscreen transitions
-- sRGB: the backbuffer is `R8G8B8A8_UNORM` with a null RTV desc, so no
-  gamma conversion is applied. Correct once real materials arrive.
+- swapchain resize and fullscreen transitions: handled on 2026-08-14, see
+  the [fullscreen toggle devlog](../devlog/2026-08-14-fullscreen-toggle.md).
+  `OnSizeChanged` flushes, releases the RTVs, resets every slot's fence
+  value to the flushed value, resizes, then re-reads the back buffer index
+  into `m_backBufferIndex` (a 2026-09-05 fix; it briefly wrote
+  `m_frameIndex`, the exact confusion this ADR exists to prevent).
+- `DXGI_ERROR_DEVICE_REMOVED` from `Present` or `ExecuteCommandLists`:
+  still open. Under the fail-fast error policy (ADR-0008) it currently
+  terminates the process with the HRESULT shown; device recovery is not
+  planned for this project.
+- sRGB: still `R8G8B8A8_UNORM` with a null RTV desc. Resolved by design in
+  ADR-0003: rendering moves to an HDR intermediate and the tonemap pass
+  writes through an `R8G8B8A8_UNORM_SRGB` RTV on the same swapchain buffer.
 
 ## Recorded output
 
