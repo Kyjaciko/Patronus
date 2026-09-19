@@ -52,6 +52,32 @@ jobs:
             throw "FrameTimingLog test exited with code $LASTEXITCODE"
           }
 
+  tools-check:
+    # Python tooling (asset bakers, benchmark report) is platform-neutral,
+    # so it runs on the cheap runner. Pure numpy/matplotlib, no GPU needed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install tooling dependencies
+        run: pip install -r tools/requirements.txt
+
+      - name: Unit tests (bakers + benchmark report)
+        run: python -m unittest discover -s tools/tests -t tools -v
+
+      - name: Bake smoke run (small sizes, throwaway output)
+        run: |
+          python tools/bake_curl_noise.py --size 16 --out /tmp/curl --preview --header
+          python tools/bake_noise2d.py --size 32 --out /tmp/noise --preview
+          python tools/bake_curves.py assets/curves/arcane_bolt.json --out /tmp/curves --preview
+          python tools/bench/bench_report.py tools/bench/example.csv --plot /tmp/bench.png
+          python tools/previs_spell.py --res 160x96 --stills 0.5 1.85 --frames /tmp/previs
+          python tools/previs_spell.py --spec assets/emitters/force_vortex.json --res 160x96 --stills 1.0 1.7 --frames /tmp/previs_vortex
+
   format-check:
     # Same windows-2022 pin as the build job -- keeps clang-format on this
     # runner at the version this project's formatting was actually verified

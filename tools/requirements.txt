@@ -1,0 +1,4 @@
+# Python tooling dependencies (bake scripts, benchmark report, tests).
+# Both were already used by the original curl-noise generator.
+numpy>=1.26
+matplotlib>=3.8
