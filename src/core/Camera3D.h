@@ -10,6 +10,7 @@ public:
 	Camera3D(float fovDegrees, float aspectRatio, float nearZ, float farZ);
 
 	void SetProjectionValues(float fovDegrees, float aspectRatio, float nearZ, float farZ);
+	void SetAspectRatio(float aspectRatio);
 
 	const DirectX::XMMATRIX& GetViewMatrix() const;
 	const DirectX::XMMATRIX& GetProjectionMatrix() const;

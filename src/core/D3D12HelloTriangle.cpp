@@ -1116,6 +1116,7 @@ void D3D12HelloTriangle::OnSizeChanged(UINT width, UINT height, bool minimized)
   // Resize screen viewport to match the current window size.
   m_viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(m_width), static_cast<float>(m_height));
   m_scissorRect = CD3DX12_RECT(0.0f, 0.0f, static_cast<LONG>(m_width), static_cast<LONG>(m_height));
+  m_camera.SetAspectRatio(static_cast<float>(width) / static_cast<float>(height));
 
   wchar_t updatedTitle[256];
   swprintf_s(updatedTitle, L"( %u x %u )", m_width, m_height);

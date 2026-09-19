@@ -23,6 +23,12 @@ void Camera3D::SetProjectionValues(float fovDegrees, float aspectRatio, float ne
 	m_ProjectionMatrix = DirectX::XMMatrixPerspectiveFovRH(fovRadians, aspectRatio, nearZ, farZ);
 }
 
+void Camera3D::SetAspectRatio(float aspectRatio)
+{
+	const float h = DirectX::XMVectorGetY(m_ProjectionMatrix.r[1]); // m11 = cot(fov/2).
+	m_ProjectionMatrix.r[0] = DirectX::XMVectorSet(h / aspectRatio, 0.f, 0.f, 0.f);
+}
+
 const DirectX::XMMATRIX& Camera3D::GetViewMatrix() const
 {
 	return m_ViewMatrix;
