@@ -561,6 +561,11 @@ void D3D12HelloTriangle::LoadAssets()
       m_camera.SetPosition(0.f, 0.f, 20.f);
     }
 
+    m_commandList->CopyResource(m_particlePool.Get(), m_particleUploadBuffer.Get());
+
+    // Change Default Heap (m_particlePool) from COPY_DEST to UNORDERED_ACCESS.
+    m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
+
     // The constant buffer size (and in that regard also the address) needs to be a multiple of 256 bytes!
     static constexpr UINT cameraSizeCB = (sizeof(CameraCB) + D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT - 1) & ~(D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT - 1);
 
@@ -671,7 +676,7 @@ void D3D12HelloTriangle::LoadAssets()
     // Copy raw curl noise data to upload heap.
     {
       // Read raw curl noise data from bin file.
-      m_rawCurlNoiseData.resize(rawCurlNoiseSize);
+      std::vector<UINT8> m_rawCurlNoiseData(rawCurlNoiseSize);
       std::ifstream file(L"tools/curl noise generator/curl_noise_64x64x64_rgba16f_type2.bin", std::ios::binary);
       if (!file.is_open()) COM_ERROR_IF_FAILED(E_FAIL, "Failed to read file: curl_noise_64x64x64_rgba16f_type2.bin.");
       
@@ -734,6 +739,10 @@ void D3D12HelloTriangle::LoadAssets()
 
     WaitForGpu();
   }
+
+  // Release the raw curl noise data, since it's now on the GPU (in the default heap).
+  m_rawCurlNoiseDataHeap.Reset(); // Allowed to reset here since WaitForGpu() is called before.
+  m_particleUploadBuffer.Reset(); //
 }
 
 // Update frame-based values.
@@ -974,18 +983,6 @@ void D3D12HelloTriangle::PopulateCommandList()
   // Safe here because BeginFrame() waited on m_fenceValues[m_frameIndex].
   COM_ERROR_IF_FAILED(m_commandAllocators[m_frameIndex]->Reset(), "Failed to reset the command allocator.");
   COM_ERROR_IF_FAILED(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), nullptr), "Failed to reset the command list.");
-
-  // Copy data from upload heap (filled by CPU) to Default Heap.
-  static bool firstRun = false;
-  if (!firstRun)
-  {
-    m_commandList->CopyResource(m_particlePool.Get(), m_particleUploadBuffer.Get());
-
-    // Change Default Heap (m_particlePool) from COPY_DEST to UNORDERED_ACCESS.
-    m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
-  
-    firstRun = true;
-  }
 
   // Compute pass.
   ID3D12DescriptorHeap* ppHeaps[] = { m_particleSrvUavHeap.Get() };

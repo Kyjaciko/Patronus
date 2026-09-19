@@ -137,7 +137,6 @@ private:
   HPTimer m_timer;
   SimulationConstants m_particleSimConstants{.particleCount = kParticleCount};
 
-  std::vector<UINT8> m_rawCurlNoiseData{};
   ComPtr<ID3D12Resource> m_rawCurlNoiseDataHeap;
   ComPtr<ID3D12Resource> m_curlNoiseTextureHeap;
 
