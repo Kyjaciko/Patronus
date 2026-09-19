@@ -1,0 +1,83 @@
+{
+  "_comment": "Arcane bolt: the nine layers from docs/roadmap.md as emitter rows. This is the data the CPU spell sequencer and the GPU EmitterParams buffer (ADR-0005) will be built from; tools/previs_spell.py renders it on the CPU to check the composition first. Emitter order is draw order (alpha layers first, brightest additive layers last). Sizes are radii in world units; curve names are rows in curve_atlas.",
+  "curve_atlas": "../curves/arcane_bolt_rgba16f",
+  "curl_noise": "../noise/curl_noise_64_rgba16f",
+  "noise_pack": "../noise/noise_pack_256_rgba8",
+  "timeline": { "start": [0, 0, 0], "target": [14, 0, 0], "charge_end": 0.8, "impact": 1.8, "end": 4.0 },
+  "camera": { "eye": [7, 2.0, 19], "look_at": [7, 0.2, 0], "fov": 32 },
+  "render": { "bloom": 0.5, "exposure": 0.45, "background": [0.010, 0.012, 0.020] },
+  "emitters": [
+    {
+      "name": "puffs", "attach": "impact", "bursts": [[1.82, 30]], "pool": 32, "life": [2.0, 2.6],
+      "spawn": { "radius": 0.6 }, "velocity": { "radial": [0.3, 0.8], "direction": [0, 0.5, 0] },
+      "forces": { "drag": 1.0 }, "size": 0.8, "curves": { "color": "puff.color", "size": "puff.size" },
+      "additive": 0.0, "shape": "disc", "erosion": 0.9, "angvel": [-0.5, 0.5]
+    },
+    {
+      "name": "motes", "attach": "projectile", "active": [0.0, 3.2], "rate": 60, "pool": 256, "life": [2.0, 3.0],
+      "spawn": { "radius": 1.6 }, "velocity": { "direction": [0, 0.25, 0], "spread": 0.15 },
+      "forces": { "curl": 0.6, "curl_scale": 4.0, "drag": 0.5 }, "size": 0.035,
+      "curves": { "color": "mote.color", "size": "mote.size" }, "additive": 1.0, "shape": "mote", "twinkle": 3.0
+    },
+    {
+      "name": "residue", "attach": "impact", "active": [1.85, 3.4], "rate": 90, "pool": 256, "life": [1.5, 2.5],
+      "spawn": { "radius": 1.2 }, "velocity": { "direction": [0, 0.35, 0], "spread": 0.2 },
+      "forces": { "curl": 0.8, "curl_scale": 3.0, "drag": 0.6 }, "size": 0.03,
+      "curves": { "color": "mote.color", "size": "mote.size" }, "additive": 1.0, "shape": "mote", "twinkle": 4.0
+    },
+    {
+      "name": "charge", "attach": "projectile", "active": [0.0, 0.8], "rate": 1500, "pool": 2048, "life": [0.5, 0.8],
+      "spawn": { "radius": 2.5, "surface": true }, "velocity": { "inward": [3.0, 4.0] },
+      "forces": { "curl": 2.0, "curl_scale": 3.0, "attract": { "strength": 15, "radius": 0, "band": 0 }, "drag": 0.5 },
+      "size": 0.05, "curves": { "color": "charge.color", "size": "charge.size" }, "additive": 1.0, "shape": "mote"
+    },
+    {
+      "name": "wisps", "attach": "projectile", "active": [0.4, 1.9], "rate": 80, "pool": 256, "life": [1.0, 1.5],
+      "spawn": { "radius": 1.1, "surface": true }, "velocity": { "radial": [0.2, 0.6], "inherit": 0.3 },
+      "forces": { "curl": 3.0, "curl_scale": 6.0, "curl_scroll": 0.1, "attract": { "strength": 2, "radius": 0, "band": 0 }, "drag": 1.5 },
+      "size": 0.45, "curves": { "color": "wisp.color", "size": "wisp.size" }, "additive": 0.3, "shape": "disc",
+      "erosion": 0.8, "angvel": [-1, 1]
+    },
+    {
+      "name": "trail", "attach": "projectile", "active": [0.8, 1.8], "rate": 200, "pool": 256, "life": [0.5, 0.6],
+      "spawn": { "radius": 0.08 }, "velocity": { "inherit": 0.0 }, "size": 0.3,
+      "curves": { "color": "trail.color", "size": "trail.width" }, "additive": 1.0, "shape": "disc"
+    },
+    {
+      "name": "shell", "attach": "projectile", "follow": true, "active": [0.4, 1.8], "rate": 3000, "pool": 2560, "life": [0.4, 0.8],
+      "spawn": { "radius": 1.0, "surface": true }, "velocity": { "radial": [0.0, 0.5] },
+      "forces": { "curl": 6.0, "curl_scale": 2.0, "curl_scroll": 0.2, "attract": { "strength": 40, "radius": 1.0, "band": 0.5 }, "drag": 5.0 },
+      "size": 0.06, "curves": { "color": "shell.color", "size": "shell.size" }, "additive": 1.0, "shape": "mote"
+    },
+    {
+      "name": "sparks", "attach": "projectile", "active": [0.8, 1.8], "rate": 150, "bursts": [[0.8, 400], [1.8, 800]],
+      "pool": 2048, "life": [0.3, 0.8], "spawn": { "radius": 0.2 }, "velocity": { "radial": [8, 15] },
+      "forces": { "gravity": -9.8, "drag": 3.0 }, "size": 0.05,
+      "curves": { "color": "spark.color", "size": "spark.size" }, "additive": 1.0, "shape": "streak", "stretch": 0.04
+    },
+    {
+      "name": "embers", "attach": "impact", "bursts": [[1.8, 400]], "pool": 512, "life": [1.0, 1.5],
+      "spawn": { "radius": 0.5 }, "velocity": { "radial": [2, 6], "direction": [0, 2, 0] },
+      "forces": { "gravity": -6.0, "drag": 1.5 }, "size": 0.04,
+      "curves": { "color": "ember.color", "size": "ember.size" }, "additive": 1.0, "shape": "mote", "twinkle": 12.0
+    },
+    {
+      "name": "core", "attach": "projectile", "follow": true, "active": [0.3, 1.8], "rate": 16, "pool": 32, "life": [0.4, 0.6],
+      "spawn": { "radius": 0.15 }, "size": 0.6,
+      "curves": { "color": "core.color", "size": "core.size" }, "additive": 1.0, "shape": "disc", "angvel": [-2, 2]
+    },
+    {
+      "name": "impact_burst", "attach": "impact", "bursts": [[1.8, 3000]], "pool": 3072, "life": [0.3, 0.8],
+      "spawn": { "radius": 0.3 }, "velocity": { "radial": [4, 12] }, "forces": { "gravity": -3.0, "drag": 4.0 },
+      "size": 0.08, "curves": { "color": "impact.color", "size": "impact.size" }, "additive": 1.0, "shape": "mote"
+    },
+    {
+      "name": "impact_ring", "attach": "impact", "bursts": [[1.8, 1]], "pool": 4, "life": [0.35, 0.35],
+      "size": 3.0, "curves": { "color": "impact.color", "size": "impact.ring" }, "additive": 1.0, "shape": "ring"
+    },
+    {
+      "name": "impact_flash", "attach": "impact", "bursts": [[1.8, 1]], "pool": 4, "life": [0.08, 0.08],
+      "size": 4.0, "curves": { "color": "impact.color" }, "additive": 1.0, "shape": "disc"
+    }
+  ]
+}

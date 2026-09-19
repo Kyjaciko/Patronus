@@ -1,0 +1,34 @@
+{
+  "format": "DXGI_FORMAT_R16G16B16A16_FLOAT",
+  "width": 64,
+  "height": 64,
+  "depth": 64,
+  "bytes_per_texel": 8,
+  "row_pitch": 512,
+  "slice_pitch": 32768,
+  "byte_size": 2097152,
+  "array_order": "[z, y, x, channel]",
+  "bin": "curl_noise_64_rgba16f.bin",
+  "channels": {
+    "R": "Vx",
+    "G": "Vy",
+    "B": "Vz",
+    "A": "scalar fbm in [0,1]"
+  },
+  "tileable": true,
+  "tile_world_size": 20.0,
+  "sampling": "uvw = (position - tileOrigin) / tile_world_size with a WRAP sampler; any origin/scale works because the volume is periodic",
+  "grid_spacing": [
+    0.3125,
+    0.3125,
+    0.3125
+  ],
+  "lattice_period": 4,
+  "octaves": 3,
+  "seed": 12345,
+  "normalization_percentile": 99.0,
+  "normalization_scale": 2.365534783819736,
+  "magnitude_mean": 0.48488742113113403,
+  "magnitude_max": 1.439987301826477,
+  "max_abs_divergence_over_max_magnitude": 2.79399245073364e-07
+}

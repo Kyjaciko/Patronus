@@ -1,0 +1,93 @@
+{
+  "_comment": "Force vortex: a horizontal blue-violet tornado that forms at the caster, travels along +x and slams into the target. Modelled on the Hogwarts Legacy Force-spell language (purple family, spiral arms around the travel axis, pulsing rings, dust dragged in, ring shockwave on impact). Same schema as arcane_bolt.json plus the ring spawn shape and the vortex force. Emitter order is draw order.",
+  "curve_atlas": "../curves/force_vortex_rgba16f",
+  "curl_noise": "../noise/curl_noise_64_rgba16f",
+  "noise_pack": "../noise/noise_pack_256_rgba8",
+  "timeline": { "start": [0, 0, 0], "target": [14, 0, 0], "charge_end": 0.5, "impact": 1.5, "end": 3.5 },
+  "camera": { "eye": [-3.5, 3.0, 10.0], "look_at": [6.5, 0.2, 0], "fov": 40 },
+  "render": { "bloom": 0.5, "exposure": 0.45, "background": [0.010, 0.012, 0.020] },
+  "emitters": [
+    {
+      "name": "dust", "attach": "projectile", "active": [0.2, 1.5], "rate": 120, "pool": 512, "life": [1.0, 1.6],
+      "spawn": { "shape": "ring", "radius": 2.6, "axis": [1, 0, 0], "arms": 1, "jitter": 3.2, "axial_range": [-1.0, 2.5] },
+      "forces": { "vortex": { "axis": [1, 0, 0], "spin": 4, "spin_rate": 2, "pull": 12, "radius": 1.1, "band": 0.6, "cone": 0.25 }, "drag": 1.0 },
+      "size": 0.55, "curves": { "color": "dust.color", "size": "dust.size" }, "additive": 0.0, "shape": "disc",
+      "erosion": 0.9, "angvel": [-1, 1]
+    },
+    {
+      "name": "plume", "attach": "impact", "bursts": [[1.52, 40]], "pool": 48, "life": [1.6, 2.2],
+      "spawn": { "shape": "ring", "radius": 0.5, "axis": [1, 0, 0], "arms": 1, "jitter": 3.2 },
+      "velocity": { "radial": [1.0, 2.5], "direction": [0.3, 0.6, 0] }, "forces": { "drag": 1.2 },
+      "size": 0.7, "curves": { "color": "plume.color", "size": "plume.size" }, "additive": 0.0, "shape": "disc",
+      "erosion": 0.9, "angvel": [-0.6, 0.6]
+    },
+    {
+      "name": "residue", "attach": "impact", "active": [1.55, 3.0], "rate": 100, "pool": 256, "life": [1.2, 2.0],
+      "spawn": { "radius": 1.5 }, "velocity": { "direction": [0, 0.4, 0], "spread": 0.25 },
+      "forces": { "curl": 0.8, "curl_scale": 3.0, "drag": 0.6 }, "size": 0.03,
+      "curves": { "color": "vresidue.color", "size": "vresidue.size" }, "additive": 1.0, "shape": "mote", "twinkle": 4.0
+    },
+    {
+      "name": "motes", "attach": "projectile", "follow": true, "active": [0.15, 1.5], "rate": 250, "pool": 512, "life": [0.5, 1.0],
+      "spawn": { "shape": "ring", "radius": 0.9, "axis": [1, 0, 0], "arms": 1, "jitter": 3.2, "axial_range": [-1.2, 1.2], "cone": 0.2 },
+      "velocity": { "tangent": [4, 7] },
+      "forces": { "vortex": { "axis": [1, 0, 0], "spin": 7, "pull": 30, "radius": 0.9, "band": 0.5, "cone": 0.2 }, "drag": 0.5 },
+      "size": 0.03, "curves": { "color": "vmote.color", "size": "vmote.size" }, "additive": 1.0, "shape": "mote", "twinkle": 5.0
+    },
+    {
+      "name": "wind", "attach": "projectile", "active": [0.5, 1.5], "rate": 300, "pool": 512, "life": [0.35, 0.6],
+      "spawn": { "shape": "ring", "radius": 1.2, "axis": [1, 0, 0], "arms": 1, "jitter": 3.2, "axial_range": [-1.5, 0.5], "cone": 0.25 },
+      "velocity": { "tangent": [6, 9], "inherit": 0.6 },
+      "forces": { "vortex": { "axis": [1, 0, 0], "spin": 12, "pull": 20, "radius": 1.2, "band": 0.4, "cone": 0.25, "axial": 6 }, "drag": 1.0 },
+      "size": 0.045, "curves": { "color": "wind.color", "size": "wind.size" }, "additive": 1.0, "shape": "streak", "stretch": 0.06
+    },
+    {
+      "name": "arms", "attach": "projectile", "follow": true, "active": [0.05, 1.5], "rate": 1500, "pool": 2048, "life": [0.5, 0.8],
+      "spawn": { "shape": "ring", "radius": 0.85, "axis": [1, 0, 0], "arms": 3, "phase_rate": 22, "pitch": 4.0, "jitter": 0.1, "surface": true, "axial_range": [-1.4, 1.0], "cone": 0.22 },
+      "velocity": { "tangent": [8, 10] },
+      "forces": { "vortex": { "axis": [1, 0, 0], "spin": 10, "spin_rate": 12, "pull": 60, "radius": 0.85, "band": 0.15, "cone": 0.22, "axial": 2 }, "drag": 0.5 },
+      "size": 0.075, "curves": { "color": "arm.color", "size": "arm.size" }, "additive": 1.0, "shape": "mote"
+    },
+    {
+      "name": "main_ring", "kind": "ring", "attach": "projectile", "bursts": [[0.05, 1]], "life": [1.45, 1.45],
+      "ring": { "axis": [1, 0, 0], "points": 200, "radius": 0.9, "expand": 0.35, "omega": 4.0,
+                "wave": { "amplitude": 0.12, "frequency": 3, "speed": 0.5 }, "axial_offset": 0.4 },
+      "size": 0.045, "curves": { "color": "ringline.color" }, "additive": 1.0, "shape": "mote"
+    },
+    {
+      "name": "arcs", "kind": "ring", "attach": "projectile", "bursts": [[0.12, 1]], "life": [1.38, 1.38],
+      "ring": { "axis": [1, 0, 0], "points": 70, "arc": 90, "count": 2, "phase": 30, "radius": 1.3, "expand": 0.45, "omega": -2.5,
+                "wave": { "amplitude": 0.05, "frequency": 2, "speed": 0.4 }, "axial_offset": 0.4 },
+      "size": 0.05, "curves": { "color": "ringline.color" }, "additive": 1.0, "shape": "mote"
+    },
+    {
+      "name": "corebeam", "attach": "projectile", "follow": true, "active": [0.1, 1.5], "rate": 120, "pool": 64, "life": [0.15, 0.3],
+      "spawn": { "shape": "ring", "radius": 0.18, "axis": [1, 0, 0], "arms": 2, "phase_rate": 40, "axial_range": [-1.2, 0.8] },
+      "velocity": { "tangent": [3, 5] }, "forces": { "drag": 2.0 },
+      "size": 0.22, "curves": { "color": "corebeam.color", "size": "corebeam.size" }, "additive": 1.0, "shape": "disc", "angvel": [-3, 3]
+    },
+    {
+      "name": "debris", "attach": "impact", "bursts": [[1.5, 900]], "pool": 1024, "life": [0.4, 0.9],
+      "spawn": { "shape": "ring", "radius": 0.4, "axis": [1, 0, 0], "arms": 1, "jitter": 3.2 },
+      "velocity": { "radial": [6, 14], "tangent": [2, 5], "direction": [-2, 1, 0] },
+      "forces": { "gravity": -8.0, "drag": 2.5 }, "size": 0.05,
+      "curves": { "color": "debris.color", "size": "debris.size" }, "additive": 1.0, "shape": "streak", "stretch": 0.05
+    },
+    {
+      "name": "impact_ring_a", "kind": "ring", "attach": "impact", "bursts": [[1.5, 1]], "life": [0.5, 0.5],
+      "ring": { "axis": [1, 0, 0], "points": 160, "radius": 0.3, "expand": 14, "omega": 7,
+                "wave": { "amplitude": 0.06, "frequency": 5, "speed": 1.0 }, "axial_velocity": 8 },
+      "size": 0.05, "curves": { "color": "shock.color" }, "additive": 1.0, "shape": "streak", "stretch": 0.035
+    },
+    {
+      "name": "impact_ring_b", "kind": "ring", "attach": "impact", "bursts": [[1.58, 1]], "life": [0.5, 0.5],
+      "ring": { "axis": [1, 0, 0], "points": 160, "radius": 0.2, "expand": 11, "omega": -6,
+                "wave": { "amplitude": 0.06, "frequency": 4, "speed": 1.0 }, "axial_velocity": 5 },
+      "size": 0.05, "curves": { "color": "shock.color" }, "additive": 1.0, "shape": "streak", "stretch": 0.035
+    },
+    {
+      "name": "flash", "attach": "impact", "bursts": [[1.5, 1]], "pool": 4, "life": [0.08, 0.08],
+      "size": 3.0, "curves": { "color": "shock.color" }, "additive": 1.0, "shape": "disc"
+    }
+  ]
+}

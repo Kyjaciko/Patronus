@@ -794,7 +794,8 @@ void D3D12HelloTriangle::LoadAssets()
     {
       // Read raw curl noise data from bin file.
       std::vector<UINT8> m_rawCurlNoiseData(rawCurlNoiseSize);
-      std::ifstream file(L"tools/curl noise generator/curl_noise_64x64x64_rgba16f_type2.bin", std::ios::binary);
+      std::ifstream file(GetAssetFullPath(L"assets/noise/old curl noise/curl_noise_64x64x64_rgba16f_type2.bin"), std::ios::binary);
+      //std::ifstream file(GetAssetFullPath(L"assets/noise/curl_noise_64_rgba16f.bin"), std::ios::binary);
       if (!file.is_open()) COM_ERROR_IF_FAILED(E_FAIL, "Failed to read file: curl_noise_64x64x64_rgba16f_type2.bin.");
       
       // Get length of the bin file.
@@ -1231,7 +1232,7 @@ void D3D12HelloTriangle::PopulateCommandList()
 
   // Indicate that the back buffer will now be used to present.
   m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_backBufferIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
-
+  
   m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::FRAME_END);
   m_commandList->ResolveQueryData(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase, kSlotsPerFrame, m_timestampQueryResult.Get(), static_cast<UINT64>(queryBase) * sizeof(UINT64));
 

@@ -30,6 +30,8 @@ include(cmake/FetchDXC.cmake)
 include(cmake/Dependencies.cmake)
 include(cmake/DearImGui.cmake) # after FetchAgilitySDK: uses PATRONUS_AGILITY_SDK_INCLUDE_DIR
 include(cmake/DeployAgilitySDK.cmake)
+include(cmake/CompileShaders.cmake)
+include(cmake/DeployAssets.cmake)
 
 # --- Agility SDK export + smoke test ------------------------------------
 # Both files below are an explicitly authorized exception to the
@@ -88,6 +90,46 @@ add_executable(PatronusFrameTimingWriterTest
 target_link_libraries(PatronusFrameTimingWriterTest PRIVATE
   patronus_profiling
   patronus_warnings
+)
+
+# --- VFX system (skeleton) ----------------------------------------------
+# src/renderer/vfx/ is the data-driven particle system described in
+# docs/adr/0010-data-driven-emitters.md. The skeleton
+# (structs, classes, empty functions) was written by Claude under a
+# one-time authorised exception recorded in each file header; every body
+# is written by the user. It is a static library so the format check and
+# /W4 /WX apply to it from day one (src/core/ is still excluded from both,
+# see .clang-format-ignore), and so D3D12HelloTriangle can adopt it
+# incrementally.
+add_library(patronus_vfx STATIC
+  src/renderer/vfx/SpellAsset.cpp
+  src/renderer/vfx/SpellInstance.cpp
+  src/renderer/vfx/VfxResources.cpp
+  src/renderer/vfx/VfxPipeline.cpp
+  src/renderer/vfx/VfxSystem.cpp
+)
+
+target_compile_definitions(patronus_vfx PUBLIC
+  UNICODE
+  _UNICODE
+  WIN32_LEAN_AND_MEAN
+  NOMINMAX
+)
+
+# Headers are included as "renderer/vfx/<name>.h" from the src/ root, so a
+# file's path says where it lives without relative ../ chains.
+target_include_directories(patronus_vfx PUBLIC
+  src
+  "${PATRONUS_AGILITY_SDK_INCLUDE_DIR}"
+)
+
+target_link_libraries(patronus_vfx
+  PUBLIC
+    D3D12MemoryAllocator # VfxResources.h holds D3D12MA::Allocation handles
+    d3d12.lib
+    dxguid.lib
+  PRIVATE
+    patronus_warnings
 )
 
 # --- D3D12HelloTriangle -------------------------------------------------
@@ -149,6 +191,7 @@ target_include_directories(D3D12HelloTriangle PRIVATE
 )
 
 target_link_libraries(D3D12HelloTriangle PRIVATE
+  patronus_vfx
   patronus_profiling
   imgui # debug UI; brings its own include dirs and imm32/d3d12 links
   d3d12.lib
@@ -179,81 +222,26 @@ add_custom_command(TARGET D3D12HelloTriangle POST_BUILD
   VERBATIM
 )
 
-# shaders.hlsl is compiled to the .cso files D3D12HelloTriangle.cpp reads
-# at startup (GetAssetFullPath resolves to the exe's own directory), using
-# our fetched DXC (cmake/FetchDXC.cmake).
-#
-# Target profile is vs_5_1/ps_5_1, matching what this vendored sample's
-# ReadDataFromFile-based design was originally built around (classic
-# DirectX-Graphics-Samples pattern: precompiled bytecode, not compiled at
-# runtime) rather than the project's general SM 6.6 policy (CLAUDE.md) --
-# though note this particular DXC version promotes any profile below 6.0
-# up to 6.0 regardless (see the "Promoting older shader model profile"
-# build warning), so it's still emitting DXIL, just at 6.0 instead of 6.6.
-# This target-profile choice is a build-flag decision, not a change to
-# shaders.hlsl itself.
-set(_hello_triangle_vs_cso "${CMAKE_BINARY_DIR}/$<CONFIG>/shaders_VSMain.cso")
-set(_hello_triangle_ps_cso "${CMAKE_BINARY_DIR}/$<CONFIG>/shaders_PSMain.cso")
-set(_particle_cs_cso "${CMAKE_BINARY_DIR}/$<CONFIG>/shaders_CSMain.cso")
-set(_particle_vs_cso "${CMAKE_BINARY_DIR}/$<CONFIG>/particle_shaders_VSMain.cso")
-set(_particle_ps_cso "${CMAKE_BINARY_DIR}/$<CONFIG>/particle_shaders_PSMain.cso")
+# Shaders live in shaders/ and are compiled to the .cso files
+# D3D12HelloTriangle.cpp reads at startup (GetAssetFullPath resolves to the
+# exe's own directory). See cmake/CompileShaders.cmake for the rule; every
+# stage is SM 6.6 per CLAUDE.md / ADR-0001. The earlier vs_5_1/ps_5_1
+# profiles were a leftover from the vendored sample and would have blocked
+# mesh shaders, ResourceDescriptorHeap and pixel-shader wave intrinsics.
+# Output basenames are the names the .cpp asks for; do not rename here
+# without renaming there.
+patronus_add_shader(D3D12HelloTriangle
+  SOURCE shaders/shaders.hlsl ENTRY VSMain PROFILE vs_6_6 OUTPUT shaders_VSMain)
+patronus_add_shader(D3D12HelloTriangle
+  SOURCE shaders/shaders.hlsl ENTRY PSMain PROFILE ps_6_6 OUTPUT shaders_PSMain)
+patronus_add_shader(D3D12HelloTriangle
+  SOURCE shaders/computeshader.hlsl ENTRY CSMain PROFILE cs_6_6 OUTPUT shaders_CSMain)
+patronus_add_shader(D3D12HelloTriangle
+  SOURCE shaders/particleshader.hlsl ENTRY VSMain PROFILE vs_6_6 OUTPUT particle_shaders_VSMain)
+patronus_add_shader(D3D12HelloTriangle
+  SOURCE shaders/particleshader.hlsl ENTRY PSMain PROFILE ps_6_6 OUTPUT particle_shaders_PSMain)
 
-# Deliberately NOT using $<TARGET_FILE_DIR:D3D12HelloTriangle> for the
-# outputs above: since these custom commands' outputs are made a build
-# dependency of that same target below, referencing the target's own file
-# dir in the OUTPUT path creates a circular generator-expression dependency
-# CMake can't resolve ("No target D3D12HelloTriangle" at generate time).
-# Neither target overrides RUNTIME_OUTPUT_DIRECTORY, so this is the VS
-# generator's actual default output location -- same place
-# PatronusSmokeTest.exe already lands.
-add_custom_command(
-  OUTPUT "${_hello_triangle_vs_cso}"
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/$<CONFIG>"
-  COMMAND "${PATRONUS_DXC_EXECUTABLE}" -T vs_5_1 -E VSMain
-          -Fo "${_hello_triangle_vs_cso}" "${CMAKE_SOURCE_DIR}/src/core/shaders.hlsl"
-  DEPENDS "${CMAKE_SOURCE_DIR}/src/core/shaders.hlsl"
-  COMMENT "Compiling shaders.hlsl:VSMain (vs_5_1)"
-  VERBATIM
-)
-add_custom_command(
-  OUTPUT "${_hello_triangle_ps_cso}"
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/$<CONFIG>"
-  COMMAND "${PATRONUS_DXC_EXECUTABLE}" -T ps_5_1 -E PSMain
-          -Fo "${_hello_triangle_ps_cso}" "${CMAKE_SOURCE_DIR}/src/core/shaders.hlsl"
-  DEPENDS "${CMAKE_SOURCE_DIR}/src/core/shaders.hlsl"
-  COMMENT "Compiling shaders.hlsl:PSMain (ps_5_1)"
-  VERBATIM
-)
-add_custom_target(D3D12HelloTriangleShaders DEPENDS "${_hello_triangle_vs_cso}" "${_hello_triangle_ps_cso}")
-add_dependencies(D3D12HelloTriangle D3D12HelloTriangleShaders)
-
-add_custom_command(
-  OUTPUT "${_particle_cs_cso}"
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/$<CONFIG>"
-  COMMAND "${PATRONUS_DXC_EXECUTABLE}" -T cs_6_6 -E CSMain
-          -Fo "${_particle_cs_cso}" "${CMAKE_SOURCE_DIR}/src/core/computeshader.hlsl"
-  DEPENDS "${CMAKE_SOURCE_DIR}/src/core/computeshader.hlsl"
-  COMMENT "Compiling computeshader.hlsl:CSMain (cs_6_6)"
-  VERBATIM
-)
-
-add_custom_command(
-  OUTPUT "${_particle_vs_cso}"
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/$<CONFIG>"
-  COMMAND "${PATRONUS_DXC_EXECUTABLE}" -T vs_5_1 -E VSMain
-          -Fo "${_particle_vs_cso}" "${CMAKE_SOURCE_DIR}/src/core/particleshader.hlsl"
-  DEPENDS "${CMAKE_SOURCE_DIR}/src/core/particleshader.hlsl"
-  COMMENT "Compiling particleshader.hlsl:VSMain (vs_5_1)"
-  VERBATIM
-)
-add_custom_command(
-  OUTPUT "${_particle_ps_cso}"
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/$<CONFIG>"
-  COMMAND "${PATRONUS_DXC_EXECUTABLE}" -T ps_5_1 -E PSMain
-          -Fo "${_particle_ps_cso}" "${CMAKE_SOURCE_DIR}/src/core/particleshader.hlsl"
-  DEPENDS "${CMAKE_SOURCE_DIR}/src/core/particleshader.hlsl"
-  COMMENT "Compiling particleshader.hlsl:PSMain (ps_5_1)"
-  VERBATIM
-)
-add_custom_target(ParticleShaders DEPENDS "${_particle_cs_cso}" "${_particle_vs_cso}" "${_particle_ps_cso}")
-add_dependencies(D3D12HelloTriangle ParticleShaders)
+# Baked assets (assets/) are copied next to the exe as assets/ so the app
+# can load them via GetAssetFullPath(L"assets/...") regardless of the
+# working directory. See cmake/DeployAssets.cmake.
+patronus_deploy_assets(D3D12HelloTriangle)

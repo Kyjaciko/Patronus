@@ -1,0 +1,93 @@
+{
+  "format": "DXGI_FORMAT_R16G16B16A16_FLOAT",
+  "width": 256,
+  "height": 19,
+  "depth": 1,
+  "bytes_per_texel": 8,
+  "row_pitch": 2048,
+  "slice_pitch": 38912,
+  "byte_size": 38912,
+  "array_order": "[y, x, channel]",
+  "bin": "force_vortex_rgba16f.bin",
+  "rows": {
+    "arm.color": {
+      "row": 0,
+      "v": 0.02631578947368421
+    },
+    "arm.size": {
+      "row": 1,
+      "v": 0.07894736842105263
+    },
+    "corebeam.color": {
+      "row": 2,
+      "v": 0.13157894736842105
+    },
+    "corebeam.size": {
+      "row": 3,
+      "v": 0.18421052631578946
+    },
+    "wind.color": {
+      "row": 4,
+      "v": 0.23684210526315788
+    },
+    "wind.size": {
+      "row": 5,
+      "v": 0.2894736842105263
+    },
+    "ringline.color": {
+      "row": 6,
+      "v": 0.34210526315789475
+    },
+    "dust.color": {
+      "row": 7,
+      "v": 0.39473684210526316
+    },
+    "dust.size": {
+      "row": 8,
+      "v": 0.4473684210526316
+    },
+    "vmote.color": {
+      "row": 9,
+      "v": 0.5
+    },
+    "vmote.size": {
+      "row": 10,
+      "v": 0.5526315789473685
+    },
+    "shock.color": {
+      "row": 11,
+      "v": 0.6052631578947368
+    },
+    "shock.size": {
+      "row": 12,
+      "v": 0.6578947368421053
+    },
+    "plume.color": {
+      "row": 13,
+      "v": 0.7105263157894737
+    },
+    "plume.size": {
+      "row": 14,
+      "v": 0.7631578947368421
+    },
+    "debris.color": {
+      "row": 15,
+      "v": 0.8157894736842105
+    },
+    "debris.size": {
+      "row": 16,
+      "v": 0.868421052631579
+    },
+    "vresidue.color": {
+      "row": 17,
+      "v": 0.9210526315789473
+    },
+    "vresidue.size": {
+      "row": 18,
+      "v": 0.9736842105263158
+    }
+  },
+  "row_count": 19,
+  "sampling": "u = normalised age with a linear CLAMP sampler; v = rows[name].v",
+  "source": "force_vortex.json"
+}

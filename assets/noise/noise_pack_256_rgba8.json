@@ -1,0 +1,22 @@
+{
+  "format": "DXGI_FORMAT_R8G8B8A8_UNORM",
+  "width": 256,
+  "height": 256,
+  "depth": 1,
+  "bytes_per_texel": 4,
+  "row_pitch": 1024,
+  "slice_pitch": 262144,
+  "byte_size": 262144,
+  "array_order": "[y, x, channel]",
+  "bin": "noise_pack_256_rgba8.bin",
+  "channels": {
+    "R": "perlin fbm coarse (erosion)",
+    "G": "worley inverted (cells)",
+    "B": "perlin fbm fine (distortion)",
+    "A": "billow fbm coarse (density)"
+  },
+  "tileable": true,
+  "lattice_period": 4,
+  "seed": 777,
+  "srgb": false
+}

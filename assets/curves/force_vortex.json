@@ -1,0 +1,34 @@
+{
+  "_comment": "Curves for the force-vortex spell (Hogwarts Legacy Force-spell palette: violet body, blue-white highlights, indigo edges). Emissive RGB with A = alpha over life; values above 1.0 are HDR. Sizes are multipliers of the emitter base size.",
+  "width": 256,
+  "curves": [
+    { "name": "arm.color",      "keys": [[0.0, [0.4, 0.2, 1.0, 0.0]], [0.2, [0.75, 0.38, 1.9, 1.0]], [0.8, [0.35, 0.25, 1.2, 0.8]], [1.0, [0.1, 0.05, 0.35, 0.0]]], "interp": "smooth" },
+    { "name": "arm.size",       "keys": [[0.0, 0.5], [0.3, 1.0], [1.0, 0.6]], "interp": "smooth" },
+
+    { "name": "corebeam.color", "keys": [[0.0, [1.5, 1.3, 3.5, 0.0]], [0.3, [3.0, 2.7, 6.5, 1.0]], [1.0, [0.9, 0.75, 2.6, 0.0]]], "interp": "smooth" },
+    { "name": "corebeam.size",  "keys": [[0.0, 0.6], [0.5, 1.0], [1.0, 0.7]] },
+
+    { "name": "wind.color",     "keys": [[0.0, [1.2, 1.8, 3.5, 0.0]], [0.3, [1.8, 2.6, 5.0, 1.0]], [1.0, [0.5, 0.7, 1.8, 0.0]]] },
+    { "name": "wind.size",      "keys": [[0.0, 0.8], [1.0, 1.0]] },
+
+    { "name": "ringline.color", "keys": [[0.0, [1.2, 0.9, 3.0, 0.0]], [0.08, [2.4, 1.8, 6.0, 1.0]], [0.85, [2.0, 1.4, 5.0, 1.0]], [1.0, [0.6, 0.4, 1.5, 0.0]]], "interp": "smooth" },
+
+    { "name": "dust.color",     "keys": [[0.0, [0.28, 0.24, 0.40, 0.0]], [0.3, [0.32, 0.28, 0.46, 0.35]], [1.0, [0.18, 0.16, 0.28, 0.0]]], "interp": "smooth" },
+    { "name": "dust.size",      "keys": [[0.0, 0.6], [1.0, 1.4]] },
+
+    { "name": "vmote.color",    "keys": [[0.0, [2.0, 2.5, 4.5, 0.0]], [0.3, [2.5, 3.2, 5.5, 1.0]], [1.0, [0.8, 1.0, 2.0, 0.0]]], "interp": "smooth" },
+    { "name": "vmote.size",     "keys": [[0.0, 0.6], [0.5, 1.0], [1.0, 0.5]] },
+
+    { "name": "shock.color",    "keys": [[0.0, [9.0, 7.0, 18.0, 1.0]], [0.4, [3.0, 2.0, 8.0, 0.8]], [1.0, [0.8, 0.5, 2.5, 0.0]]] },
+    { "name": "shock.size",     "keys": [[0.0, 0.0], [1.0, 1.0]], "interp": "smooth" },
+
+    { "name": "plume.color",    "keys": [[0.0, [0.30, 0.26, 0.42, 0.0]], [0.25, [0.36, 0.31, 0.50, 0.45]], [1.0, [0.18, 0.16, 0.26, 0.0]]], "interp": "smooth" },
+    { "name": "plume.size",     "keys": [[0.0, 0.4], [1.0, 1.9]] },
+
+    { "name": "debris.color",   "keys": [[0.0, [3.5, 2.8, 7.0, 1.0]], [0.5, [1.2, 0.8, 3.0, 0.7]], [1.0, [0.2, 0.15, 0.6, 0.0]]] },
+    { "name": "debris.size",    "keys": [[0.0, 1.0], [1.0, 0.3]] },
+
+    { "name": "vresidue.color", "keys": [[0.0, [1.0, 1.2, 2.2, 0.0]], [0.3, [1.4, 1.6, 2.8, 1.0]], [1.0, [0.4, 0.5, 1.0, 0.0]]], "interp": "smooth" },
+    { "name": "vresidue.size",  "keys": [[0.0, 0.6], [0.5, 1.0], [1.0, 0.4]] }
+  ]
+}

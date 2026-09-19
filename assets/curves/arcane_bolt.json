@@ -1,0 +1,36 @@
+{
+  "_comment": "Starting-point curves for the nine spell layers in docs/roadmap.md. Colour keys are emissive RGB with A = alpha over life; values above 1.0 are intentional (HDR). Size keys are multipliers of the emitter's base size. Tune in place and re-run tools/bake_curves.py.",
+  "width": 256,
+  "curves": [
+    { "name": "core.color",       "keys": [[0.0, [6.0, 3.0, 16.0, 0.0]], [0.15, [12.0, 6.0, 30.0, 1.0]], [0.85, [8.0, 4.0, 20.0, 1.0]], [1.0, [2.0, 1.0, 6.0, 0.0]]], "interp": "smooth" },
+    { "name": "core.size",        "keys": [[0.0, 0.7], [0.3, 1.0], [1.0, 0.85]], "interp": "smooth" },
+
+    { "name": "shell.color",      "keys": [[0.0, [1.0, 4.0, 6.0, 0.0]], [0.2, [1.5, 5.0, 8.0, 1.0]], [0.7, [3.0, 2.0, 8.0, 0.8]], [1.0, [1.0, 0.5, 3.0, 0.0]]] },
+    { "name": "shell.size",       "keys": [[0.0, 0.6], [0.3, 1.0], [1.0, 0.2]], "interp": "smooth" },
+
+    { "name": "wisp.color",       "keys": [[0.0, [0.15, 0.45, 0.6, 0.0]], [0.25, [0.25, 0.7, 0.9, 0.35]], [0.8, [0.35, 0.3, 0.8, 0.25]], [1.0, [0.1, 0.08, 0.3, 0.0]]], "interp": "smooth" },
+    { "name": "wisp.size",        "keys": [[0.0, 0.4], [0.5, 1.0], [1.0, 1.4]] },
+
+    { "name": "spark.color",      "keys": [[0.0, [12.0, 11.0, 10.0, 1.0]], [0.3, [10.0, 5.0, 1.5, 1.0]], [0.7, [4.0, 1.2, 0.3, 0.8]], [1.0, [0.6, 0.1, 0.05, 0.0]]] },
+    { "name": "spark.size",       "keys": [[0.0, 1.0], [0.8, 0.8], [1.0, 0.0]] },
+
+    { "name": "trail.color",      "keys": [[0.0, [4.0, 2.0, 10.0, 1.0]], [0.6, [2.0, 1.0, 6.0, 0.6]], [1.0, [0.5, 0.2, 1.5, 0.0]]] },
+    { "name": "trail.width",      "keys": [[0.0, 1.0], [1.0, 0.0]], "interp": "smooth" },
+
+    { "name": "mote.color",       "keys": [[0.0, [1.5, 2.0, 2.5, 0.0]], [0.3, [2.0, 2.6, 3.0, 1.0]], [0.8, [1.5, 2.0, 2.5, 0.7]], [1.0, [0.5, 0.7, 1.0, 0.0]]], "interp": "smooth" },
+    { "name": "mote.size",        "keys": [[0.0, 0.5], [0.5, 1.0], [1.0, 0.6]], "interp": "smooth" },
+
+    { "name": "charge.color",     "keys": [[0.0, [0.8, 2.5, 3.5, 0.0]], [0.4, [1.5, 4.0, 5.0, 1.0]], [1.0, [6.0, 6.0, 10.0, 1.0]]], "interp": "smooth" },
+    { "name": "charge.size",      "keys": [[0.0, 0.3], [1.0, 1.0]] },
+
+    { "name": "impact.color",     "keys": [[0.0, [20.0, 18.0, 30.0, 1.0]], [0.2, [10.0, 5.0, 25.0, 1.0]], [0.6, [3.0, 1.5, 8.0, 0.6]], [1.0, [0.5, 0.2, 1.5, 0.0]]] },
+    { "name": "impact.size",      "keys": [[0.0, 0.5], [0.15, 1.0], [1.0, 0.3]], "interp": "smooth" },
+    { "name": "impact.ring",      "keys": [[0.0, 0.0], [1.0, 1.0]], "interp": "smooth" },
+
+    { "name": "ember.color",      "keys": [[0.0, [8.0, 3.5, 0.8, 1.0]], [0.5, [4.0, 1.2, 0.2, 0.9]], [1.0, [0.8, 0.15, 0.02, 0.0]]] },
+    { "name": "ember.size",       "keys": [[0.0, 1.0], [1.0, 0.4]] },
+
+    { "name": "puff.color",       "keys": [[0.0, [0.35, 0.3, 0.5, 0.0]], [0.2, [0.4, 0.35, 0.55, 0.3]], [1.0, [0.2, 0.18, 0.3, 0.0]]], "interp": "smooth" },
+    { "name": "puff.size",        "keys": [[0.0, 0.5], [1.0, 1.6]] }
+  ]
+}
