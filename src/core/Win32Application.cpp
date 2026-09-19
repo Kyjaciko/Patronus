@@ -6,6 +6,8 @@ bool Win32Application::m_fullscreenMode = false;
 RECT Win32Application::m_windowRect;
 using Microsoft::WRL::ComPtr;
 
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
 int Win32Application::Run(DXSample* pSample, HINSTANCE hInstance, int nCmdShow)
 {
   // Parse the command line parameters
@@ -124,11 +126,22 @@ void Win32Application::ToggleFullscreenWindow(IDXGISwapChain* pSwapChain)
 // Main message handler for the sample.
 LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+  if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam))
+		return true; // ImGui is handling the message.
+
   DXSample* pSample = reinterpret_cast<DXSample*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
 
   Mouse* mouse = nullptr;
   Keyboard* keyboard = nullptr;
-  if (pSample) 
+  if (pSample && ImGui::GetCurrentContext()) 
+  {
+    ImGuiIO& io = ImGui::GetIO();
+    if (!io.WantCaptureMouse)
+      mouse = pSample->GetMouse();
+    if (!io.WantCaptureKeyboard)
+      keyboard = pSample->GetKeyboard();
+  }
+  else if(pSample)
   {
     mouse = pSample->GetMouse();
     keyboard = pSample->GetKeyboard();
@@ -145,7 +158,7 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
     return 0;
 
   case WM_PAINT:
-    if (pSample && mouse && keyboard)
+    if (pSample)
     {
       pSample->OnUpdate();
       pSample->OnRender();

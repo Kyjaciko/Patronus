@@ -82,6 +82,10 @@ private:
   ComPtr<ID3D12Resource> m_vertexBuffer;
   D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
 
+  ComPtr<ID3D12Resource> m_indexBuffer;
+  ComPtr<ID3D12Resource> m_indexUploadBuffer;
+  D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
+
   // Synchronization objects.
   UINT m_frameIndex; // per-frame resources;  Sequence: 0..kFramesInFlight-1 -> 0,1,0,1,0,1,...
   UINT m_backBufferIndex; // RTVs;            Sequence: 0..kBufferCount-1 -> 0,1,2,0,1,2,...
@@ -100,6 +104,7 @@ private:
     PoolUAV = 0, // Compute shader reads and updates the particles in this buffer.
     CurlNoiseSRV, // Must immediately follow PoolUAV because the compute root signature (see srvUavRange) expects u0 and t0 to be contiguous in the descriptor table.
     PoolSRV, // Vertex shader reads the particle data from this buffer.
+    DearImGui, // Dear ImGui font texture.
     Count
   };
 

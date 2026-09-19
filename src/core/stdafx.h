@@ -12,6 +12,10 @@
 #include <DirectXMath.h>
 #include "include/d3dx12/d3dx12.h"
 
+#include <imgui.h>
+#include <imgui_impl_win32.h>
+#include <imgui_impl_dx12.h>
+
 #include <memory>
 #include <string>
 #include <cassert>

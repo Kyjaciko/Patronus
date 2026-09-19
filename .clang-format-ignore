@@ -15,3 +15,5 @@
 # change (CLAUDE.md: never silently reformat unrelated code).
 src/core/*
 src/platform/input/*
+tests/profiling/*
+src/profiling/*

@@ -28,6 +28,7 @@ include(cmake/CompilerWarnings.cmake)
 include(cmake/FetchAgilitySDK.cmake)
 include(cmake/FetchDXC.cmake)
 include(cmake/Dependencies.cmake)
+include(cmake/DearImGui.cmake) # after FetchAgilitySDK: uses PATRONUS_AGILITY_SDK_INCLUDE_DIR
 include(cmake/DeployAgilitySDK.cmake)
 
 # --- Agility SDK export + smoke test ------------------------------------
@@ -149,6 +150,7 @@ target_include_directories(D3D12HelloTriangle PRIVATE
 
 target_link_libraries(D3D12HelloTriangle PRIVATE
   patronus_profiling
+  imgui # debug UI; brings its own include dirs and imm32/d3d12 links
   d3d12.lib
   dxgi.lib
   dxguid.lib

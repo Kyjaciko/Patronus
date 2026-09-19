@@ -22,13 +22,61 @@ D3D12HelloTriangle::D3D12HelloTriangle(UINT width, UINT height, std::wstring nam
 
 D3D12HelloTriangle::~D3D12HelloTriangle()
 {
-  m_timestampLogger.Close();
+  m_timestampWriter.Close();
+
+  ImGui_ImplDX12_Shutdown();
+  ImGui_ImplWin32_Shutdown();
+  ImGui::DestroyContext();
 }
 
 void D3D12HelloTriangle::OnInit()
 {
   LoadPipeline();
   LoadAssets();
+
+  // Setup Dear ImGui.
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO& io = ImGui::GetIO();
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+  io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+  io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // Allow Dear ImGui to be outside our window.
+
+  ImGui::StyleColorsDark();
+  ImGuiStyle& style = ImGui::GetStyle();
+  /*style.ScaleAllSizes(dpi_scale); // TODO: Implement DPI aware ImGui.
+  style.FontScaleDpi = dpi_scale;
+  io.ConfigDpiScaleFonts = true;
+  io.ConfigDpiScaleViewports = true;*/
+
+  // When viewports are enabled we tweak the style so platform windows can look identical to regular ones.
+  if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+  {
+    style.WindowRounding = 0.f;
+    style.Colors[ImGuiCol_WindowBg].w = 1.f;
+  }
+
+  ImGui_ImplWin32_Init(Win32Application::GetHwnd());
+  ImGui_ImplDX12_InitInfo initInfo{};
+  initInfo.Device = m_device.Get();
+  initInfo.CommandQueue = m_commandQueue.Get();
+  initInfo.NumFramesInFlight = kFramesInFlight;
+  initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM; // See: DXGI_SWAP_CHAIN_DESC1 swapChainDesc.
+  initInfo.DSVFormat = DXGI_FORMAT_UNKNOWN;        // No depth buffer currently.
+  initInfo.UserData = nullptr;
+  initInfo.SrvDescriptorHeap = m_particleSrvUavHeap.Get();
+  initInfo.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo* info, D3D12_CPU_DESCRIPTOR_HANDLE* cpuHandle, D3D12_GPU_DESCRIPTOR_HANDLE* gpuHandle) {
+    ID3D12DescriptorHeap* srvHeap = info->SrvDescriptorHeap;
+    UINT descriptorSize = info->Device->GetDescriptorHandleIncrementSize(srvHeap->GetDesc().Type);
+
+    *cpuHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(srvHeap->GetCPUDescriptorHandleForHeapStart(), D3D12HelloTriangle::ParticleHeap::DearImGui, descriptorSize);
+    *gpuHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(srvHeap->GetGPUDescriptorHandleForHeapStart(), D3D12HelloTriangle::ParticleHeap::DearImGui, descriptorSize);
+  };
+  initInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo* info, D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle, D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle) {
+    // Permanently reserve a slot for Dear ImGui.
+  };
+  ImGui_ImplDX12_Init(&initInfo);
 }
 
 // Load the rendering pipeline dependencies.
@@ -374,6 +422,74 @@ void D3D12HelloTriangle::LoadAssets()
       "Failed to create the vertex buffer."
     );
 
+    // Create the index buffer.
+    {
+      static constexpr UINT kVerticesPerParticle = 4;
+      static constexpr UINT kIndicesPerParticle  = 6;
+      const UINT indexCount = kIndicesPerParticle * kParticleCount;
+
+      std::vector<uint32_t> indices(indexCount);
+      for (UINT i = 0; i < kParticleCount; ++i)
+      {
+        // Each particle has it's own 4 vertices (square).
+        const uint32_t baseVertexId = i * kVerticesPerParticle;
+
+        // See: particleshader.hlsl for order.
+        // Triangle 1: tl, tr, bl.
+        indices[i * kIndicesPerParticle + 0] = baseVertexId + 0;
+        indices[i * kIndicesPerParticle + 1] = baseVertexId + 1;
+        indices[i * kIndicesPerParticle + 2] = baseVertexId + 2;
+
+        // Triangle 2: bl, tr, br.
+        indices[i * kIndicesPerParticle + 3] = baseVertexId + 2;
+        indices[i * kIndicesPerParticle + 4] = baseVertexId + 1;
+        indices[i * kIndicesPerParticle + 5] = baseVertexId + 3;
+      }
+
+      const UINT indexBufferSize = indexCount * sizeof(uint32_t);
+
+      COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+          &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+          D3D12_HEAP_FLAG_NONE,
+          &CD3DX12_RESOURCE_DESC::Buffer(indexBufferSize),
+          D3D12_RESOURCE_STATE_GENERIC_READ,
+          nullptr,
+          IID_PPV_ARGS(&m_indexUploadBuffer)
+        ), 
+        "Failed to create the index upload buffer."
+      );
+
+      COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+          &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+          D3D12_HEAP_FLAG_NONE,
+          &CD3DX12_RESOURCE_DESC::Buffer(indexBufferSize),
+          D3D12_RESOURCE_STATE_COPY_DEST,
+          nullptr,
+          IID_PPV_ARGS(&m_indexBuffer)
+        ), 
+        "Failed to create the index default buffer."
+      );
+
+      // Copy the data to the index upload buffer.
+      UINT8* pIndexDataBegin = nullptr;
+      CD3DX12_RANGE readRange(0, 0);
+      COM_ERROR_IF_FAILED(m_indexUploadBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pIndexDataBegin)), "Failed to map the index buffer.");
+      memcpy(pIndexDataBegin, indices.data(), indexBufferSize);
+      m_indexUploadBuffer->Unmap(0, nullptr);
+
+      // Copy the data from upload to the default buffer.
+      m_commandList->CopyResource(m_indexBuffer.Get(), m_indexUploadBuffer.Get());
+
+      // Change Default Heap (m_indexBuffer) from COPY_DEST to INDEX_BUFFER.
+      m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_indexBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER));
+    
+      m_indexBufferView = {
+        .BufferLocation = m_indexBuffer->GetGPUVirtualAddress(),
+        .SizeInBytes = indexBufferSize,
+        .Format = DXGI_FORMAT_R32_UINT  // uint32_t = R32_UINT.
+      };
+    }
+
     const UINT particlePoolSize = sizeof(Particle) * kParticleCount;
 
     // Place the particle pool (structured buffer) in the Default Heap.
@@ -716,8 +832,7 @@ void D3D12HelloTriangle::LoadAssets()
         }
       };
 
-      CD3DX12_CPU_DESCRIPTOR_HANDLE particleHeap(m_particleSrvUavHeap->GetCPUDescriptorHandleForHeapStart());
-      CD3DX12_CPU_DESCRIPTOR_HANDLE srvCurlNoiseHandle(particleHeap, ParticleHeap::CurlNoiseSRV, m_particleSrvUavDescriptorSize);
+      CD3DX12_CPU_DESCRIPTOR_HANDLE srvCurlNoiseHandle(m_particleSrvUavHeap->GetCPUDescriptorHandleForHeapStart(), ParticleHeap::CurlNoiseSRV, m_particleSrvUavDescriptorSize);
       m_device->CreateShaderResourceView(m_curlNoiseTextureHeap.Get(), &srvCurlNoiseDesc, srvCurlNoiseHandle);
     }
   }
@@ -785,11 +900,20 @@ void D3D12HelloTriangle::LoadAssets()
   // Release the raw curl noise data, since it's now on the GPU (in the default heap).
   m_rawCurlNoiseDataHeap.Reset(); // Allowed to reset here since WaitForGpu() is called before.
   m_particleUploadBuffer.Reset(); //
+  m_indexUploadBuffer.Reset();
 }
 
 // Update frame-based values.
 void D3D12HelloTriangle::OnUpdate()
 {
+  // Enable Dear ImGui recording.
+  ImGui_ImplDX12_NewFrame();
+  ImGui_ImplWin32_NewFrame();
+  ImGui::NewFrame();
+
+  static bool show_demo_window = true;
+  if (show_demo_window) ImGui::ShowDemoWindow(&show_demo_window);
+
   m_timer.Update();
   m_particleSimConstants.deltaTime = std::min(static_cast<float>(m_timer.GetDeltaTime()), kMaxDeltaTime);
 
@@ -899,12 +1023,23 @@ void D3D12HelloTriangle::OnRender()
   // and we would otherwise write to the same CB the GPU is reading from.
   UpdateCameraCB(m_cameraCB[m_frameIndex]);
 
+  // Capture all Dear ImGui draw data.
+  ImGui::Render();
+
   // Record all the commands we need to render the scene into the command list.
   PopulateCommandList();
 
   // Execute the command list.
   ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
   m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+
+  // Update and render additional platform windows.
+  ImGuiIO& io = ImGui::GetIO();
+  if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+  {
+    ImGui::UpdatePlatformWindows();
+    ImGui::RenderPlatformWindowsDefault();
+  }
 
   // Present the frame.
   if (m_VSync)
