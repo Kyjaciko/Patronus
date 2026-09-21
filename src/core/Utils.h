@@ -13,4 +13,4 @@ namespace patronus::utils
     return static_cast<double>(end_ticks - start_ticks) * 1000. / static_cast<double>(ticks_per_second);
   }
 
-}  // namespace patronus::profiling
+}  // namespace patronus::utils

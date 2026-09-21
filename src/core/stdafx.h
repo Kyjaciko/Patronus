@@ -16,6 +16,10 @@
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx12.h>
 
+#include <cstdint>
+#include <string>
+#include <vector>
+#include <utility>
 #include <memory>
 #include <string>
 #include <cassert>
