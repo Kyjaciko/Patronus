@@ -11,6 +11,7 @@
 #include "Camera3D.h"
 #include "Utils.h"
 #include "profiling/FrameTimingWriter.h"
+#include "renderer/GraphicsAdapterManager.h"
 
 using namespace DirectX;
 
@@ -94,6 +95,10 @@ private:
   HANDLE m_frameLatencyWaitable;
   ComPtr<ID3D12Fence> m_fence;
   UINT64 m_fenceValues[kFramesInFlight];
+
+  // Hardware.
+  patronus::hardware::GraphicsAdapter        hardware_adapter_;
+  patronus::hardware::GraphicsAdapterManager adapter_manager_;
 
   // Particle system.
   ComPtr<ID3D12DescriptorHeap> m_particleSrvUavHeap;

@@ -154,6 +154,8 @@ add_executable(D3D12HelloTriangle WIN32
   src/platform/input/MouseEvent.cpp
   src/platform/input/Mouse.cpp
   src/core/Win32Application.cpp
+  src/renderer/DisplayOutput.cpp
+  src/renderer/GraphicsAdapterManager.cpp
   src/core/GameObject.cpp
   src/core/GameObject3D.cpp
   src/core/Camera3D.cpp

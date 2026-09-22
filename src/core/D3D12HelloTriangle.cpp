@@ -102,7 +102,7 @@ void D3D12HelloTriangle::LoadPipeline()
   ComPtr<IDXGIFactory5> factory;
   COM_ERROR_IF_FAILED(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)), "Failed to create DXGI factory.");
 
-  if (m_useWarpDevice)
+  /*if (m_useWarpDevice)
   {
     ComPtr<IDXGIAdapter> warpAdapter;
     COM_ERROR_IF_FAILED(factory->EnumWarpAdapter(IID_PPV_ARGS(&warpAdapter)), "Failed to enumerate through the adapters.");
@@ -126,7 +126,16 @@ void D3D12HelloTriangle::LoadPipeline()
       ), 
       "Failed to create the device."
     );
-  }
+  }*/
+  std::vector<patronus::hardware::GraphicsAdapter> hardware_adapters = adapter_manager_.GetHardwareAdapters();
+  hardware_adapter_ = hardware_adapters[0];
+  COM_ERROR_IF_FAILED(D3D12CreateDevice(
+      hardware_adapter_.GetNativeAdapter(),
+      D3D_FEATURE_LEVEL_12_2,
+      IID_PPV_ARGS(&m_device)
+    ), 
+    "Failed to create the device."
+  );
 
 #if defined(_DEBUG)
   ComPtr<ID3D12InfoQueue> infoQueue;
@@ -884,7 +893,7 @@ void D3D12HelloTriangle::LoadAssets()
   {
     // Get adapter name.
     DXGI_ADAPTER_DESC1 adapterDesc;
-    m_hardwareAdapter->GetDesc1(&adapterDesc);
+    hardware_adapter_.GetNativeAdapter()->GetDesc1(&adapterDesc);
 
     patronus::profiling::FrameTimingWriter::Metadata metadata {
       {"gpu", StringHelper::WideToString(adapterDesc.Description)},
@@ -912,8 +921,34 @@ void D3D12HelloTriangle::OnUpdate()
   ImGui_ImplWin32_NewFrame();
   ImGui::NewFrame();
 
-  static bool show_demo_window = true;
-  if (show_demo_window) ImGui::ShowDemoWindow(&show_demo_window);
+  //static bool show_demo_window = true;
+  //if (show_demo_window) ImGui::ShowDemoWindow(&show_demo_window);
+
+  ImGui::Begin("Display Outputs");
+
+  std::vector<patronus::hardware::DisplayOutput> display_outputs = hardware_adapter_.GetDisplayOutputs();
+  for (const auto& display : display_outputs)
+  {
+    const auto red = display.GetRedPrimary();
+    const auto green = display.GetGreenPrimary();
+    const auto blue = display.GetBluePrimary();
+    const auto white = display.GetWhitePoint();
+
+    ImGui::Text("Display: %ls", display.GetName());
+
+    ImGui::Text("BitsPerColor:          %u", display.GetBitsPerColor());
+    ImGui::Text("MinLuminance:          %.3f", display.GetMinLuminance());
+    ImGui::Text("MaxLuminance:          %.1f", display.GetMaxLuminance());
+    ImGui::Text("MaxFullFrameLuminance: %.1f", display.GetMaxFullFrameLuminance());
+    ImGui::Text("RedPrimary:            %.4f, %.4f", red[0], red[1]);
+    ImGui::Text("GreenPrimary:          %.4f, %.4f", green[0], green[1]);
+    ImGui::Text("BluePrimary:           %.4f, %.4f", blue[0], blue[1]);
+    ImGui::Text("WhitePoint:            %.4f, %.4f", white[0], white[1]);
+
+    ImGui::Separator();
+  }
+
+  ImGui::End();
 
   m_timer.Update();
   m_particleSimConstants.deltaTime = std::min(static_cast<float>(m_timer.GetDeltaTime()), kMaxDeltaTime);

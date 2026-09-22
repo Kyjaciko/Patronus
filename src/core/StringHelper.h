@@ -2,6 +2,7 @@
 
 #include <string>
 #include <algorithm>
+#include <windows.h>
 
 class StringHelper
 {
@@ -14,8 +15,14 @@ public:
 
 	static std::string WideToString(const std::wstring& w_str)
 	{
-		std::string string(w_str.begin(), w_str.end());
-		return string;
+		if (w_str.empty())
+			return std::string{};
+
+		const int len = static_cast<int>(w_str.size());
+		const int size = WideCharToMultiByte(CP_UTF8, 0, w_str.data(), len, nullptr, 0, nullptr, nullptr);
+		std::string output(size, '\0');
+		WideCharToMultiByte(CP_UTF8, 0, w_str.data(), len, &output[0], size, nullptr, nullptr);
+		return output;
 	}
 
 	static std::string GetDirectoryFromPath(const std::string& filePath)

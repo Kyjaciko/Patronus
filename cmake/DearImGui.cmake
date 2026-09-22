@@ -30,6 +30,19 @@ FetchContent_Declare(
   GIT_SHALLOW    FALSE
 )
 
+# If a configure is interrupted (Ctrl-C) while this clone is running, the
+# next configure fails with:
+#
+#   Error removing directory ".../external/imgui-src"
+#   Failed to remove directory: '.../external/imgui-src'
+#
+# That is not corruption. FetchContent re-clones when the half-written
+# clone stamp in external/imgui-subbuild is older than the declare info,
+# and re-cloning deletes imgui-src first -- which fails while the orphaned
+# git.exe from the interrupted run still holds a handle on it. Wait for
+# that process to exit (or end it), then configure again. If it persists,
+# delete external/imgui-src AND external/imgui-subbuild together; deleting
+# only one of the two is what produces this state in the first place.
 FetchContent_MakeAvailable(imgui)
 
 if(imgui_POPULATED AND NOT TARGET imgui)
