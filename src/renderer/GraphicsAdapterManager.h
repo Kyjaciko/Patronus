@@ -24,8 +24,12 @@ namespace patronus::hardware
     GraphicsAdapter();
     explicit GraphicsAdapter(_In_ Microsoft::WRL::ComPtr<IDXGIAdapter4> adapter);
 
-    void EnumerateDisplayOutputs(_In_ Microsoft::WRL::ComPtr<IDXGIAdapter4> adapter); 
+    void EnumerateDisplayOutputs(_In_ Microsoft::WRL::ComPtr<IDXGIAdapter4> adapter);
+
     HRESULT GetMemoryInfo(_Out_ MemoryInfo& result, const uint32_t node = 0, const DXGI_MEMORY_SEGMENT_GROUP segment = DXGI_MEMORY_SEGMENT_GROUP_LOCAL) const;
+    
+    // Returns the first queried display if it fails to retrieve the main display.
+    const DisplayOutput& GetPrimaryMonitor(_In_ HWND hwnd, const DWORD flags = MONITOR_DEFAULTTONEAREST);
 
     IDXGIAdapter4* GetNativeAdapter() const noexcept          { return adapter_.Get(); }
     const DXGI_ADAPTER_DESC3& GetDescription() const noexcept { return description_; }
@@ -43,6 +47,7 @@ namespace patronus::hardware
     Microsoft::WRL::ComPtr<IDXGIAdapter4> adapter_;
     DXGI_ADAPTER_DESC3                    description_;
     std::vector<DisplayOutput>            display_outputs_;
+    std::ptrdiff_t                        primary_display_index_;
   };
 
   class GraphicsAdapterManager

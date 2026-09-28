@@ -62,7 +62,7 @@ void D3D12HelloTriangle::OnInit()
   initInfo.Device = m_device.Get();
   initInfo.CommandQueue = m_commandQueue.Get();
   initInfo.NumFramesInFlight = kFramesInFlight;
-  initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM; // See: DXGI_SWAP_CHAIN_DESC1 swapChainDesc.
+  initInfo.RTVFormat = patronus::renderer::settings::GetOutputFormatDescription(format_).rtv_format;
   initInfo.DSVFormat = DXGI_FORMAT_UNKNOWN;        // No depth buffer currently.
   initInfo.UserData = nullptr;
   initInfo.SrvDescriptorHeap = m_particleSrvUavHeap.Get();
@@ -102,40 +102,22 @@ void D3D12HelloTriangle::LoadPipeline()
   ComPtr<IDXGIFactory5> factory;
   COM_ERROR_IF_FAILED(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)), "Failed to create DXGI factory.");
 
-  /*if (m_useWarpDevice)
+  // Enumerate over the hardware.
   {
-    ComPtr<IDXGIAdapter> warpAdapter;
-    COM_ERROR_IF_FAILED(factory->EnumWarpAdapter(IID_PPV_ARGS(&warpAdapter)), "Failed to enumerate through the adapters.");
+    std::vector<patronus::hardware::GraphicsAdapter> hardware_adapters = adapter_manager_.GetHardwareAdapters();
+    hardware_adapter_ = hardware_adapters[0];                                    // Set the highest performance adapter as standard hardware adapter.
+    monitor_ = hardware_adapter_.GetPrimaryMonitor(Win32Application::GetHwnd()); // Select the main monitor as standard display.
+    display_mode_ = monitor_.GetCurrentDisplayMode();                            // Set SDR as basic mode.
+    tonemap_constants_.peak_nits = monitor_.GetMaxLuminance();
 
     COM_ERROR_IF_FAILED(D3D12CreateDevice(
-        warpAdapter.Get(),
+        hardware_adapter_.GetNativeAdapter(),
         D3D_FEATURE_LEVEL_12_2,
         IID_PPV_ARGS(&m_device)
       ), 
       "Failed to create the device."
     );
   }
-  else
-  {
-    GetHardwareAdapter(factory.Get(), &m_hardwareAdapter);
-
-    COM_ERROR_IF_FAILED(D3D12CreateDevice(
-        m_hardwareAdapter.Get(),
-        D3D_FEATURE_LEVEL_12_2,
-        IID_PPV_ARGS(&m_device)
-      ), 
-      "Failed to create the device."
-    );
-  }*/
-  std::vector<patronus::hardware::GraphicsAdapter> hardware_adapters = adapter_manager_.GetHardwareAdapters();
-  hardware_adapter_ = hardware_adapters[0];
-  COM_ERROR_IF_FAILED(D3D12CreateDevice(
-      hardware_adapter_.GetNativeAdapter(),
-      D3D_FEATURE_LEVEL_12_2,
-      IID_PPV_ARGS(&m_device)
-    ), 
-    "Failed to create the device."
-  );
 
 #if defined(_DEBUG)
   ComPtr<ID3D12InfoQueue> infoQueue;
@@ -161,7 +143,7 @@ void D3D12HelloTriangle::LoadPipeline()
   DXGI_SWAP_CHAIN_DESC1 swapChainDesc {
     .Width = m_width, 
     .Height = m_height, 
-    .Format = DXGI_FORMAT_R8G8B8A8_UNORM,
+    .Format = display_mode_.GetSwapChainFormat(),
     .Stereo = FALSE,
     .SampleDesc = { .Count = 1, .Quality = 0 }, // MSAA turned OFF; flip models don't support MSAA directly on a swap chain!
     .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
@@ -202,7 +184,7 @@ void D3D12HelloTriangle::LoadPipeline()
     // Describe and create a render target view (RTV) descriptor heap.
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc {
       .Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-      .NumDescriptors = kBufferCount,
+      .NumDescriptors = kBufferCount + 1, // +1 for scene texture.
       .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
       .NodeMask = 0
     };
@@ -227,11 +209,17 @@ void D3D12HelloTriangle::LoadPipeline()
   {
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
 
+    D3D12_RENDER_TARGET_VIEW_DESC render_description{
+      .Format = display_mode_.GetRTVFormat(),
+      .ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D,
+      .Texture2D = { 0, 0 }
+    };
+
     // Create a RTV for each frame.
     for (UINT n = 0; n < kBufferCount; ++n)
     {
       COM_ERROR_IF_FAILED(m_swapChain->GetBuffer(n, IID_PPV_ARGS(&m_renderTargets[n])), "Failed to obtain the swap chain back buffer.");
-      m_device->CreateRenderTargetView(m_renderTargets[n].Get(), nullptr, rtvHandle);
+      m_device->CreateRenderTargetView(m_renderTargets[n].Get(), &render_description, rtvHandle);
       rtvHandle.Offset(1, m_rtvDescriptorSize);
     }
   }
@@ -259,7 +247,36 @@ void D3D12HelloTriangle::LoadAssets()
     featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
   }
 
-  // Create an empty root signature.
+  // Create the tonemap root signature.
+  // Only pixel shader should have access to the data.
+  {
+    D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags =
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_VERTEX_SHADER_ROOT_ACCESS        |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS          |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS        |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS      |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_AMPLIFICATION_SHADER_ROOT_ACCESS |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_MESH_SHADER_ROOT_ACCESS;
+
+    // Define one SRV slot at register t0 for the scene texture (scene_texture_).
+    CD3DX12_DESCRIPTOR_RANGE1 srvRange;
+    srvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+
+    // Put the SRV descriptor and a constant buffer into root parameters and make it visible to the vertex shader.
+    CD3DX12_ROOT_PARAMETER1 rootParameters[2];
+    rootParameters[0].InitAsConstants(4, 0, 0, D3D12_SHADER_VISIBILITY_PIXEL); // register b0.
+    rootParameters[1].InitAsDescriptorTable(1, &srvRange, D3D12_SHADER_VISIBILITY_PIXEL);
+
+    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
+    rootSignatureDesc.Init_1_1(_countof(rootParameters), rootParameters, 0, nullptr, rootSignatureFlags);
+
+    ComPtr<ID3DBlob> signature;
+    ComPtr<ID3DBlob> error;
+    COM_ERROR_IF_FAILED(D3DX12SerializeVersionedRootSignature(&rootSignatureDesc, featureData.HighestVersion, &signature, &error), "Failed to serialize the root signature.");
+    COM_ERROR_IF_FAILED(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_tonemapRootSignature)), "Failed to create the root signature.");
+  }
+
+  // Create a root signature.
   {
     // Allow input layout and deny uneccessary access to certain pipeline stages.
     D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags =
@@ -307,6 +324,15 @@ void D3D12HelloTriangle::LoadAssets()
     COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"particle_shaders_VSMain.cso").c_str(), &pParticleVertexShaderData, &particleVertexShaderDataLength), "Failed to read the particle vertex shader.");
     COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"particle_shaders_PSMain.cso").c_str(), &pParticlePixelShaderData, &particlePixelShaderDataLength), "Failed to read the particle pixel shader.");
 
+    UINT8* pTonemapVertexShaderData = nullptr;
+    UINT8* pTonemapPixelShaderData = nullptr;
+    UINT tonemapVertexShaderDataLength = 0;
+    UINT tonemapPixelShaderDataLength = 0;
+
+    // Shader to tonemap.
+    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"tonemap_shaders_VSMain.cso").c_str(), &pTonemapVertexShaderData, &tonemapVertexShaderDataLength), "Failed to read the particle vertex shader.");
+    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"tonemap_shaders_PSMain.cso").c_str(), &pTonemapPixelShaderData, &tonemapPixelShaderDataLength), "Failed to read the particle pixel shader.");
+
     // Define the vertex input layout.
     D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
     {
@@ -327,15 +353,29 @@ void D3D12HelloTriangle::LoadAssets()
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    //psoDesc.RTVFormats[0] = patronus::renderer::settings::GetOutputFormatDescription(patronus::renderer::settings::OutputFormat::kHdr10).rtv_format;
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R11G11B10_FLOAT;
     psoDesc.SampleDesc.Count = 1;
-    COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)), "Failed to create the graphics pipeline state.");
-  
+    COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)), "Failed to create the SDR graphics pipeline state.");
+
     D3D12_GRAPHICS_PIPELINE_STATE_DESC particlePsoDesc(psoDesc);
     particlePsoDesc.InputLayout = { nullptr, 0 }; // No vertex input layout, very important since we use SV_VertexID!
     particlePsoDesc.VS = CD3DX12_SHADER_BYTECODE(pParticleVertexShaderData, particleVertexShaderDataLength);
     particlePsoDesc.PS = CD3DX12_SHADER_BYTECODE(pParticlePixelShaderData, particlePixelShaderDataLength);
     COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&particlePsoDesc, IID_PPV_ARGS(&m_particlePipelineState)), "Failed to create the particle graphics pipeline state.");
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC tonemapPsoDesc(particlePsoDesc);
+    tonemapPsoDesc.pRootSignature = m_tonemapRootSignature.Get();
+    tonemapPsoDesc.VS = CD3DX12_SHADER_BYTECODE(pTonemapVertexShaderData, tonemapVertexShaderDataLength);
+    tonemapPsoDesc.PS = CD3DX12_SHADER_BYTECODE(pTonemapPixelShaderData, tonemapPixelShaderDataLength);
+    tonemapPsoDesc.RTVFormats[0] = patronus::renderer::settings::GetOutputFormatDescription(patronus::renderer::settings::OutputFormat::kHdr10).rtv_format;
+    COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&tonemapPsoDesc, IID_PPV_ARGS(&m_tonemapHdrPipelineState)), "Failed to create the HDR tonemap pipeline state.");
+
+    tonemapPsoDesc.RTVFormats[0] = patronus::renderer::settings::GetOutputFormatDescription(patronus::renderer::settings::OutputFormat::kScRGB).rtv_format;
+    COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&tonemapPsoDesc, IID_PPV_ARGS(&m_tonemapScRgbPipelineState)), "Failed to create the scRGB tonemap pipeline state.");
+
+    tonemapPsoDesc.RTVFormats[0] = patronus::renderer::settings::GetOutputFormatDescription(patronus::renderer::settings::OutputFormat::kSdr).rtv_format;
+    COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&tonemapPsoDesc, IID_PPV_ARGS(&m_tonemapSdrPipelineState)), "Failed to create the SDR tonemap pipeline state.");
 
     free(pVertexShaderData);
     free(pPixelShaderData);
@@ -875,6 +915,52 @@ void D3D12HelloTriangle::LoadAssets()
     );
   }
 
+  // Create the HDR scene texture.
+  {
+    CD3DX12_RESOURCE_DESC resource_description = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R11G11B10_FLOAT, m_width, m_height, 1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
+    D3D12_CLEAR_VALUE clear_value {
+      .Format = DXGI_FORMAT_R11G11B10_FLOAT,
+      .Color = { 0.0f, 0.2f, 0.4f, 1.0f }
+    };
+
+    COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+        D3D12_HEAP_FLAG_NONE,
+        &resource_description,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+        &clear_value,
+        IID_PPV_ARGS(&scene_texture_)
+      ), 
+      L"Failed to create the timestamp readback buffer."
+    );
+
+    // Create the scene texture as a render target.
+    D3D12_RENDER_TARGET_VIEW_DESC render_description{
+      .Format = clear_value.Format,
+      .ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D,
+      .Texture2D = { 0, 0 }
+    };
+
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), kSceneTextureIndex, m_rtvDescriptorSize);
+    m_device->CreateRenderTargetView(scene_texture_.Get(), &render_description, rtvHandle);
+  
+    // Create the scene texture as a SRV.
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv_description {
+      .Format = clear_value.Format,
+      .ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D,
+      .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+      .Texture2D = {
+        .MostDetailedMip = 0,
+        .MipLevels = 1,
+        .PlaneSlice = 0,
+        .ResourceMinLODClamp = 0.f
+      }
+    };
+
+    CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(m_particleSrvUavHeap->GetCPUDescriptorHandleForHeapStart(), ParticleHeap::SceneTexture, m_particleSrvUavDescriptorSize);
+    m_device->CreateShaderResourceView(scene_texture_.Get(), &srv_description, srvHandle);
+  }
+
   // Create synchronization objects and wait until assets have been uploaded to the GPU.
   {
     COM_ERROR_IF_FAILED(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)), "Failed to create fence");
@@ -916,40 +1002,6 @@ void D3D12HelloTriangle::LoadAssets()
 // Update frame-based values.
 void D3D12HelloTriangle::OnUpdate()
 {
-  // Enable Dear ImGui recording.
-  ImGui_ImplDX12_NewFrame();
-  ImGui_ImplWin32_NewFrame();
-  ImGui::NewFrame();
-
-  //static bool show_demo_window = true;
-  //if (show_demo_window) ImGui::ShowDemoWindow(&show_demo_window);
-
-  ImGui::Begin("Display Outputs");
-
-  std::vector<patronus::hardware::DisplayOutput> display_outputs = hardware_adapter_.GetDisplayOutputs();
-  for (const auto& display : display_outputs)
-  {
-    const auto red = display.GetRedPrimary();
-    const auto green = display.GetGreenPrimary();
-    const auto blue = display.GetBluePrimary();
-    const auto white = display.GetWhitePoint();
-
-    ImGui::Text("Display: %ls", display.GetName());
-
-    ImGui::Text("BitsPerColor:          %u", display.GetBitsPerColor());
-    ImGui::Text("MinLuminance:          %.3f", display.GetMinLuminance());
-    ImGui::Text("MaxLuminance:          %.1f", display.GetMaxLuminance());
-    ImGui::Text("MaxFullFrameLuminance: %.1f", display.GetMaxFullFrameLuminance());
-    ImGui::Text("RedPrimary:            %.4f, %.4f", red[0], red[1]);
-    ImGui::Text("GreenPrimary:          %.4f, %.4f", green[0], green[1]);
-    ImGui::Text("BluePrimary:           %.4f, %.4f", blue[0], blue[1]);
-    ImGui::Text("WhitePoint:            %.4f, %.4f", white[0], white[1]);
-
-    ImGui::Separator();
-  }
-
-  ImGui::End();
-
   m_timer.Update();
   m_particleSimConstants.deltaTime = std::min(static_cast<float>(m_timer.GetDeltaTime()), kMaxDeltaTime);
 
@@ -1006,6 +1058,21 @@ void D3D12HelloTriangle::OnUpdate()
     {
       m_VSync = !m_VSync;
     }
+    else if (key == VK_F1 && event.IsPressed())
+    {
+      OnFormatChanged(patronus::renderer::settings::OutputFormat::kSdr);
+      tonemap_constants_.output_mode = 0u;
+    }
+    else if (key == VK_F2 && event.IsPressed())
+    {
+      OnFormatChanged(patronus::renderer::settings::OutputFormat::kHdr10);
+      tonemap_constants_.output_mode = 1u;
+    }
+    else if (key == VK_F3 && event.IsPressed())
+    {
+      OnFormatChanged(patronus::renderer::settings::OutputFormat::kScRGB);
+      tonemap_constants_.output_mode = 2u;
+    }
   }
 
   // Camera rotation tracks mouse movement while right button is held.
@@ -1045,6 +1112,84 @@ void D3D12HelloTriangle::OnUpdate()
     m_camera.AdjustPosition(0.f, cameraSpeed * m_particleSimConstants.deltaTime, 0.f);
   if (m_keyboard->IsKeyPressed(VK_CONTROL))
     m_camera.AdjustPosition(0.f, -cameraSpeed * m_particleSimConstants.deltaTime, 0.f);
+
+  // Enable Dear ImGui recording.
+  {
+    ImGui_ImplDX12_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
+    ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
+
+    //static bool show_demo_window = true;
+    //if (show_demo_window) ImGui::ShowDemoWindow(&show_demo_window);
+
+    ImGui::Begin("Debug hardware");
+
+    std::vector<patronus::hardware::DisplayOutput> display_outputs = hardware_adapter_.GetDisplayOutputs();
+    for (const auto& display : display_outputs)
+    {
+      const auto red = display.GetRedPrimary();
+      const auto green = display.GetGreenPrimary();
+      const auto blue = display.GetBluePrimary();
+      const auto white = display.GetWhitePoint();
+
+      ImGui::Text("Display: %ls", display.GetName());
+      ImGui::Text("HDR available:         %ls", display.IsHdrSupported() ? L"Yes" : L"No");
+      ImGui::Text("BitsPerColor:          %u", display.GetBitsPerColor());
+      ImGui::Text("ColorSpace:            %u", display.GetColorSpace());
+      ImGui::Text("MinLuminance:          %.3f", display.GetMinLuminance());
+      ImGui::Text("MaxLuminance:          %.1f", display.GetMaxLuminance());
+      ImGui::Text("MaxFullFrameLuminance: %.1f", display.GetMaxFullFrameLuminance());
+      ImGui::Text("RedPrimary:            %.4f, %.4f", red[0], red[1]);
+      ImGui::Text("GreenPrimary:          %.4f, %.4f", green[0], green[1]);
+      ImGui::Text("BluePrimary:           %.4f, %.4f", blue[0], blue[1]);
+      ImGui::Text("WhitePoint:            %.4f, %.4f", white[0], white[1]);
+
+      for (const auto& mode : display.GetDisplayModes())
+      {
+        const auto res = mode.GetResolution();
+        if (res.width == 0 || res.height == 0)
+          continue;
+
+        ImGui::Separator();
+
+        const auto rfr = mode.GetRefreshRate();
+        const uint32_t numerator = rfr.numerator;
+        const uint32_t denominator = rfr.denominator;
+
+        ImGui::Text("Resolution:               %u, %u", res.width, res.height);
+        ImGui::Text("Refresh rate numerator:   %u", numerator);
+        ImGui::Text("Refresh rate denominator: %u", denominator);
+        ImGui::Text("Refresh rate:             %.6f", static_cast<float>(numerator) / static_cast<float>(denominator));
+        ImGui::Text("Output format:            %s", mode.GetOutputFormatName().data());
+      }
+
+      ImGui::Separator();
+    }
+    ImGui::End();
+
+    ImGui::Begin("Debug primary hardware");
+    ImGui::Text("Primary Display: %ls", monitor_.GetName());
+    {
+      const auto res = display_mode_.GetResolution();
+      const auto rfr = display_mode_.GetRefreshRate();
+      const uint32_t numerator = rfr.numerator;
+      const uint32_t denominator = rfr.denominator;
+
+      ImGui::Text("Resolution:               %u, %u", res.width, res.height);
+      ImGui::Text("Refresh rate numerator:   %u", numerator);
+      ImGui::Text("Refresh rate denominator: %u", denominator);
+      ImGui::Text("Refresh rate:             %.6f", static_cast<float>(numerator) / static_cast<float>(denominator));
+      ImGui::Text("Output format:            %s", display_mode_.GetOutputFormatName().data());
+    }
+    ImGui::End();
+
+    ImGui::Begin("Tonemap parameters");
+    ImGui::SliderFloat("Exposure        ", &tonemap_constants_.exposure, -6.f, 6.f, "%.1f EV");
+    ImGui::SliderFloat("Paper white nits", &tonemap_constants_.paper_white_nits, 80.f, 400.f, "%.0f nits");
+    ImGui::SliderFloat("Peaks nits      ", &tonemap_constants_.peak_nits, 203.f, 2000.f, "%.0f nits");
+    ImGui::End();
+  }
 }
 
 // Render the scene.
@@ -1092,11 +1237,8 @@ void D3D12HelloTriangle::OnRender()
   EndFrame();
 }
 
-void D3D12HelloTriangle::OnSizeChanged(UINT width, UINT height, bool minimized)
+void D3D12HelloTriangle::RefactorPipeline(DXGI_FORMAT swap_chain_format, DXGI_FORMAT rtv_format, DXGI_COLOR_SPACE_TYPE color_space, UINT width, UINT height, bool minimized)
 {
-  if (minimized || (width == m_width && height == m_height))
-    goto UpdateWindowState;
-
   m_width = width;
   m_height = height;
   m_aspectRatio = static_cast<float>(width) / static_cast<float>(height);
@@ -1104,11 +1246,18 @@ void D3D12HelloTriangle::OnSizeChanged(UINT width, UINT height, bool minimized)
   // Flush all remaining GPU commands.
   WaitForGpu();
 
+  // Clean up Dear ImGui backend.
+  ImGui_ImplDX12_Shutdown();
+  ImGui_ImplWin32_Shutdown();
+
   // Release resources holding references to the swap chain.
   for (UINT n = 0; n < kBufferCount; ++n) 
   {
     m_renderTargets[n].Reset();
   }
+
+  // Release HDR scene texture.
+  scene_texture_.Reset();
 
   // Reset the fence values to the current fance value.
   for (UINT n = 0; n < kFramesInFlight; ++n) 
@@ -1123,7 +1272,7 @@ void D3D12HelloTriangle::OnSizeChanged(UINT width, UINT height, bool minimized)
       kBufferCount,
       m_width,
       m_height,
-      swapChainDesc.BufferDesc.Format,
+      swap_chain_format,
       swapChainDesc.Flags
     ), 
     "Failed to resize swap chain."
@@ -1140,14 +1289,96 @@ void D3D12HelloTriangle::OnSizeChanged(UINT width, UINT height, bool minimized)
   {
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
 
+    D3D12_RENDER_TARGET_VIEW_DESC render_description{
+      .Format = rtv_format,
+      .ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D,
+      .Texture2D = { 0, 0 }
+    };
+
     // Recreate a RTV for each frame.
     for (UINT n = 0; n < kBufferCount; ++n)
     {
       COM_ERROR_IF_FAILED(m_swapChain->GetBuffer(n, IID_PPV_ARGS(&m_renderTargets[n])), "Failed to obtain the swap chain back buffer.");
-      m_device->CreateRenderTargetView(m_renderTargets[n].Get(), nullptr, rtvHandle);
+      m_device->CreateRenderTargetView(m_renderTargets[n].Get(), &render_description, rtvHandle);
       rtvHandle.Offset(1, m_rtvDescriptorSize);
     }
   }
+
+  // Change color space.
+  {
+    UINT support = 0;
+    COM_ERROR_IF_FAILED(m_swapChain->CheckColorSpaceSupport(color_space, &support), "Failed to check if the color space is supported by the swap chain.");
+    if ((support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) != 0)
+      COM_ERROR_IF_FAILED(m_swapChain->SetColorSpace1(color_space), "Failed to set color space of the swap chain.");
+  }
+
+  // Resize HDR scene texture.
+  {
+    CD3DX12_RESOURCE_DESC resource_description = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R11G11B10_FLOAT, m_width, m_height, 1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
+    D3D12_CLEAR_VALUE clear_value {
+      .Format = DXGI_FORMAT_R11G11B10_FLOAT,
+      .Color = { 0.0f, 0.2f, 0.4f, 1.0f }
+    };
+
+    COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+        D3D12_HEAP_FLAG_NONE,
+        &resource_description,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+        &clear_value,
+        IID_PPV_ARGS(&scene_texture_)
+      ), 
+      L"Failed to create the timestamp readback buffer."
+    );
+
+    // Create the scene texture as a render target.
+    D3D12_RENDER_TARGET_VIEW_DESC render_description{
+      .Format = clear_value.Format,
+      .ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D,
+      .Texture2D = { 0, 0 }
+    };
+
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), kSceneTextureIndex, m_rtvDescriptorSize);
+    m_device->CreateRenderTargetView(scene_texture_.Get(), &render_description, rtvHandle);
+  
+    // Create the scene texture as a SRV.
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv_description {
+      .Format = clear_value.Format,
+      .ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D,
+      .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+      .Texture2D = {
+        .MostDetailedMip = 0,
+        .MipLevels = 1,
+        .PlaneSlice = 0,
+        .ResourceMinLODClamp = 0.f
+      }
+    };
+
+    CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(m_particleSrvUavHeap->GetCPUDescriptorHandleForHeapStart(), ParticleHeap::SceneTexture, m_particleSrvUavDescriptorSize);
+    m_device->CreateShaderResourceView(scene_texture_.Get(), &srv_description, srvHandle);
+  }
+
+  // Reset Dear ImGui.
+  ImGui_ImplWin32_Init(Win32Application::GetHwnd());
+  ImGui_ImplDX12_InitInfo initInfo{};
+  initInfo.Device = m_device.Get();
+  initInfo.CommandQueue = m_commandQueue.Get();
+  initInfo.NumFramesInFlight = kFramesInFlight;
+  initInfo.RTVFormat = rtv_format;
+  initInfo.DSVFormat = DXGI_FORMAT_UNKNOWN;        // No depth buffer currently.
+  initInfo.UserData = nullptr;
+  initInfo.SrvDescriptorHeap = m_particleSrvUavHeap.Get();
+  initInfo.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo* info, D3D12_CPU_DESCRIPTOR_HANDLE* cpuHandle, D3D12_GPU_DESCRIPTOR_HANDLE* gpuHandle) {
+    ID3D12DescriptorHeap* srvHeap = info->SrvDescriptorHeap;
+    UINT descriptorSize = info->Device->GetDescriptorHandleIncrementSize(srvHeap->GetDesc().Type);
+
+    *cpuHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(srvHeap->GetCPUDescriptorHandleForHeapStart(), D3D12HelloTriangle::ParticleHeap::DearImGui, descriptorSize);
+    *gpuHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(srvHeap->GetGPUDescriptorHandleForHeapStart(), D3D12HelloTriangle::ParticleHeap::DearImGui, descriptorSize);
+  };
+  initInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo* info, D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle, D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle) {
+    // Permanently reserve a slot for Dear ImGui.
+  };
+  ImGui_ImplDX12_Init(&initInfo);
 
   // Resize screen viewport to match the current window size.
   m_viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(m_width), static_cast<float>(m_height));
@@ -1157,9 +1388,29 @@ void D3D12HelloTriangle::OnSizeChanged(UINT width, UINT height, bool minimized)
   wchar_t updatedTitle[256];
   swprintf_s(updatedTitle, L"( %u x %u )", m_width, m_height);
   SetCustomWindowText(updatedTitle);
+}
+
+void D3D12HelloTriangle::OnSizeChanged(UINT width, UINT height, bool minimized)
+{
+  if (minimized || (width == m_width && height == m_height))
+    goto UpdateWindowState;
+
+  //RefactorPipeline(display_mode_.GetSwapChainFormat(), display_mode_.GetRTVFormat(), display_mode_.GetColorSpace(), width, height, minimized);
+  const auto& format_description = patronus::renderer::settings::GetOutputFormatDescription(format_);
+  RefactorPipeline(format_description.swap_chain_format, format_description.rtv_format, format_description.color_space, width, height, minimized);
 
 UpdateWindowState:
   m_windowVisible = !minimized;
+}
+
+void D3D12HelloTriangle::OnFormatChanged(patronus::renderer::settings::OutputFormat format)
+{
+  const auto& format_description = patronus::renderer::settings::GetOutputFormatDescription(format);
+  RefactorPipeline(format_description.swap_chain_format, format_description.rtv_format, format_description.color_space, m_width, m_height, m_windowVisible);
+  format_ = format; 
+  
+  // TODO: update display_mode_ instead of format_.
+  //display_mode_ = patronus::hardware::DisplayMode(format, );
 }
 
 void D3D12HelloTriangle::OnDestroy()
@@ -1207,67 +1458,123 @@ void D3D12HelloTriangle::PopulateCommandList()
   m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::FRAME_BEGIN);
 
   // Compute pass.
-  ID3D12DescriptorHeap* ppHeaps[] = { m_particleSrvUavHeap.Get() };
-  m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
+  {
+    ID3D12DescriptorHeap* ppHeaps[] = { m_particleSrvUavHeap.Get() };
+    m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
 
-  CD3DX12_GPU_DESCRIPTOR_HANDLE particleHeap(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
-  CD3DX12_GPU_DESCRIPTOR_HANDLE uavHandle(particleHeap, ParticleHeap::PoolUAV, m_particleSrvUavDescriptorSize);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE particleHeap(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
+    CD3DX12_GPU_DESCRIPTOR_HANDLE uavHandle(particleHeap, ParticleHeap::PoolUAV, m_particleSrvUavDescriptorSize);
 
-  m_commandList->SetPipelineState(m_computePipelineState.Get());
-  m_commandList->SetComputeRootSignature(m_computeRootSignature.Get());
-  m_commandList->SetComputeRoot32BitConstants(0, 2, &m_particleSimConstants, 0);
-  m_commandList->SetComputeRootDescriptorTable(1, uavHandle);
+    m_commandList->SetPipelineState(m_computePipelineState.Get());
+    m_commandList->SetComputeRootSignature(m_computeRootSignature.Get());
+    m_commandList->SetComputeRoot32BitConstants(0, 2, &m_particleSimConstants, 0);
+    m_commandList->SetComputeRootDescriptorTable(1, uavHandle);
 
-  constexpr UINT threadGroupCountX = (kParticleCount + 255) / 256; // Round up NOT down.
-  m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::SIM_BEGIN);
-  m_commandList->Dispatch(threadGroupCountX, 1, 1);
-  m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::SIM_END);
-
-  // Change Default Heap (m_particlePool) from UNORDERED_ACCESS to SHADER_RESOURCE.
-  m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
+    constexpr UINT threadGroupCountX = (kParticleCount + 255) / 256; // Round up NOT down.
+    m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::SIM_BEGIN);
+    m_commandList->Dispatch(threadGroupCountX, 1, 1);
+    m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::SIM_END);
+  }
 
   // Graphics pass.
-  m_commandList->SetPipelineState(m_pipelineState.Get());
-  m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
-  m_commandList->RSSetViewports(1, &m_viewport);
-  m_commandList->RSSetScissorRects(1, &m_scissorRect);
+  {
+    const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
 
-  // Indicate that the back buffer will be used as a render target.
-  m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_backBufferIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+    // Render to scene texture.
+    {
+      m_commandList->SetPipelineState(m_pipelineState.Get());
+      m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+      m_commandList->RSSetViewports(1, &m_viewport);
+      m_commandList->RSSetScissorRects(1, &m_scissorRect);
 
-  CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_backBufferIndex, m_rtvDescriptorSize);
-  m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+      // Indicate that the scene texture wil be used as a render target.
+      m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(scene_texture_.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET));
 
-  // Render triangle.
-  const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
-  m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-  m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-  m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-  m_commandList->DrawInstanced(3, 1, 0, 0);
+      // Change Default Heap (m_particlePool) from UNORDERED_ACCESS to SHADER_RESOURCE.
+      m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
 
-  // Render particles.
-  m_commandList->SetPipelineState(m_particlePipelineState.Get());
-  //m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
-  m_commandList->SetGraphicsRootConstantBufferView(0, m_cameraCB[m_frameIndex]->GetGPUVirtualAddress());
-  CD3DX12_GPU_DESCRIPTOR_HANDLE srvHandle(particleHeap, ParticleHeap::PoolSRV, m_particleSrvUavDescriptorSize);
-  m_commandList->SetGraphicsRootDescriptorTable(1, srvHandle);
-  //m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-  m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // DrawIndexedInstanced()
-  m_commandList->IASetIndexBuffer(&m_indexBufferView); // DrawIndexedInstanced()
-  m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::RENDER_BEGIN);
-  //m_commandList->DrawInstanced(4, kParticleCount, 0, 0);
-  m_commandList->DrawIndexedInstanced(6 * kParticleCount, 1, 0, 0, 0);
-  m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::RENDER_END);
+      // Set scene texture as render target.
+      CD3DX12_CPU_DESCRIPTOR_HANDLE sceneTextureRtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), kSceneTextureIndex, m_rtvDescriptorSize);
+      m_commandList->OMSetRenderTargets(1, &sceneTextureRtvHandle, FALSE, nullptr);
 
-  // Render Dear ImGui.
-  ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
+      // Render triangle.
+      m_commandList->ClearRenderTargetView(sceneTextureRtvHandle, clearColor, 0, nullptr);
+      m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+      m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+      m_commandList->DrawInstanced(3, 1, 0, 0);
 
-  // Change Default Heap (m_particlePool) from SHADER_RESOURCE to UNORDERED_ACCESS.
-  m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
+      // Render particles.
+      m_commandList->SetPipelineState(m_particlePipelineState.Get());
+      m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+      m_commandList->SetGraphicsRootConstantBufferView(0, m_cameraCB[m_frameIndex]->GetGPUVirtualAddress());
+      CD3DX12_GPU_DESCRIPTOR_HANDLE srvHandle(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart(), ParticleHeap::PoolSRV, m_particleSrvUavDescriptorSize);
+      m_commandList->SetGraphicsRootDescriptorTable(1, srvHandle);
+      //m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+      m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // DrawIndexedInstanced()
+      m_commandList->IASetIndexBuffer(&m_indexBufferView); // DrawIndexedInstanced()
+      m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::RENDER_BEGIN);
+      //m_commandList->DrawInstanced(4, kParticleCount, 0, 0);
+      m_commandList->DrawIndexedInstanced(6 * kParticleCount, 1, 0, 0, 0);
+      m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::RENDER_END);
+    
+      // Change Default Heap (m_particlePool) from SHADER_RESOURCE to UNORDERED_ACCESS.
+      m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
+
+      // Indicate that the scene texture wil be used as a SRV.
+      m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(scene_texture_.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+    }
+
+    // Render to the back buffer.
+    {
+      switch (format_)
+      {
+        case patronus::renderer::settings::OutputFormat::kSdr:
+          m_commandList->SetPipelineState(m_tonemapSdrPipelineState.Get());
+          break;
+
+        case patronus::renderer::settings::OutputFormat::kHdr10:
+          m_commandList->SetPipelineState(m_tonemapHdrPipelineState.Get());
+          break;
+
+        case patronus::renderer::settings::OutputFormat::kScRGB:
+          m_commandList->SetPipelineState(m_tonemapScRgbPipelineState.Get());
+          break;
+
+        default:
+          m_commandList->SetPipelineState(m_tonemapSdrPipelineState.Get());
+          break;
+      }
+      m_commandList->SetGraphicsRootSignature(m_tonemapRootSignature.Get());
+
+      // Set root parameters.
+      m_commandList->SetGraphicsRoot32BitConstants(0, 4, &tonemap_constants_, 0);
+
+      CD3DX12_GPU_DESCRIPTOR_HANDLE sceneTextureSrvHandle(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart(), SceneTexture, m_particleSrvUavDescriptorSize);
+      m_commandList->SetGraphicsRootDescriptorTable(1, sceneTextureSrvHandle);
+
+      // Indicate that the back buffer will be used as a render target.
+      m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_backBufferIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+    
+      // Set back buffer as render target.
+      CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_backBufferIndex, m_rtvDescriptorSize);
+      m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+      // Clear back buffer, technically this is not necessary since blending is turned off.
+      m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+
+      // Render to the back buffer, using fullscreen triangle.
+      m_commandList->DrawInstanced(3, 1, 0, 0);
+    }
+  }
+
+  // Render Dear ImGui on the back buffer.
+  {
+    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
+  }
 
   // Indicate that the back buffer will now be used to present.
   m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_backBufferIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
-  
+
   m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::FRAME_END);
   m_commandList->ResolveQueryData(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase, kSlotsPerFrame, m_timestampQueryResult.Get(), static_cast<UINT64>(queryBase) * sizeof(UINT64));
 

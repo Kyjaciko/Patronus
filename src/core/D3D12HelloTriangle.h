@@ -35,6 +35,9 @@ protected:
   void OnSizeChanged(UINT width, UINT height, bool minimized) override;
   void OnDestroy() override;
 
+  void RefactorPipeline(DXGI_FORMAT swap_chain_format, DXGI_FORMAT rtv_format, DXGI_COLOR_SPACE_TYPE color_space, UINT width, UINT height, bool minimized);
+  void OnFormatChanged(patronus::renderer::settings::OutputFormat format);
+
 private:
   // Two independent numbers, not shared:
   //
@@ -44,6 +47,7 @@ private:
   // kFramesInFlight — how far the CPU may run ahead of the GPU.
   //
   static constexpr UINT kBufferCount = 3;
+  static constexpr UINT kSceneTextureIndex = kBufferCount;
   static constexpr UINT kFramesInFlight = 2;
 
   static constexpr UINT kParticleCount = 1'000'000;
@@ -97,8 +101,33 @@ private:
   UINT64 m_fenceValues[kFramesInFlight];
 
   // Hardware.
+  patronus::renderer::settings::OutputFormat format_{patronus::renderer::settings::OutputFormat::kSdr};
+  patronus::hardware::DisplayMode            display_mode_;
+  patronus::hardware::DisplayOutput          monitor_;
   patronus::hardware::GraphicsAdapter        hardware_adapter_;
   patronus::hardware::GraphicsAdapterManager adapter_manager_;
+
+  // Output mode.
+  struct TonemapConstants
+  {
+    float     exposure{};
+    float     paper_white_nits{};
+    float     peak_nits{};
+    uint32_t  output_mode{};
+  };
+
+  TonemapConstants tonemap_constants_{
+    .exposure         = 2.f,   // EV.
+    .paper_white_nits = 203.f, // Guideline: ITU-R BT.2408.
+    .peak_nits        = 0.f,
+    .output_mode      = static_cast<uint32_t>(format_)
+  };
+
+  ComPtr<ID3D12RootSignature> m_tonemapRootSignature;
+  ComPtr<ID3D12PipelineState> m_tonemapSdrPipelineState;
+  ComPtr<ID3D12PipelineState> m_tonemapHdrPipelineState;
+  ComPtr<ID3D12PipelineState> m_tonemapScRgbPipelineState;
+  ComPtr<ID3D12Resource> scene_texture_;
 
   // Particle system.
   ComPtr<ID3D12DescriptorHeap> m_particleSrvUavHeap;
@@ -110,6 +139,7 @@ private:
     CurlNoiseSRV, // Must immediately follow PoolUAV because the compute root signature (see srvUavRange) expects u0 and t0 to be contiguous in the descriptor table.
     PoolSRV, // Vertex shader reads the particle data from this buffer.
     DearImGui, // Dear ImGui font texture.
+    SceneTexture,
     Count
   };
 

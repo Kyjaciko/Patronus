@@ -7,6 +7,7 @@ namespace patronus::hardware
     : adapter_(nullptr)
     , description_{}
     , display_outputs_(kAverageDisplayCount)
+    , primary_display_index_(renderer::settings::kInvalidIndex)
   {
   }
 
@@ -71,6 +72,28 @@ namespace patronus::hardware
     };
 
     return hr;
+  }
+
+  _Use_decl_annotations_
+  const DisplayOutput& GraphicsAdapter::GetPrimaryMonitor(HWND hwnd, const DWORD flags)
+  {
+    if (primary_display_index_ != renderer::settings::kInvalidIndex)
+      return display_outputs_[primary_display_index_];
+
+    // Retrieve the monitor with the largest area of intersection with the specified window.
+    const HMONITOR monitor = MonitorFromWindow(hwnd, flags);
+    for (std::ptrdiff_t i = 0; i < std::ssize(display_outputs_); ++i)
+    {
+      const DisplayOutput display = display_outputs_[i];
+      if (display.GetDescription().Monitor != monitor)
+        continue;
+
+      primary_display_index_ = i;
+      return display_outputs_[primary_display_index_];
+    }
+
+    // TODO: legal since the vector is filled through initialization but still not a good practice. 
+    return display_outputs_[0];
   }
 
   GraphicsAdapterManager::GraphicsAdapterManager()
