@@ -1,7 +1,7 @@
 # ADR 0012: HDR10 and scRGB display output
 
-Status: Proposed
-Date: 2026-09-23
+Status: Accepted
+Date: 2026-09-23 (revised 2026-09-28)
 
 ## Context
 
@@ -95,13 +95,50 @@ colour-space support is reported against the current buffer format.
 `CheckColorSpaceSupport` is a compatibility check, not an HDR check; under
 DWM it can report HDR10 as presentable on an SDR desktop.
 
+The scene renders into ADR-0003's `R11G11B10_FLOAT` target with one
+pipeline state per pass, whatever the output mode. The scene shaders no
+longer know which display they end up on. Only the tonemap pass, and
+anything drawn after it, needs a pipeline state per output mode.
+
 The tonemap pass keeps one shader with one pipeline state per output mode,
 differing only in the final encode, and always produces **absolute
-luminance in nits** before that encode. Two parameters drive it, both
-exposed in the debug UI: `paper_white_nits` (what scene 1.0 maps to,
-defaulting to 200 to match Windows' SDR white level) and `peak_nits` (from
-`MaxLuminance`, where the highlight shoulder lands). The Rec.709 to
-Rec.2020 matrix is BT.2087; the PQ transfer function is SMPTE ST 2084.
+luminance in nits** before that encode. Three parameters drive it, all
+exposed in the debug UI:
+
+- `exposure`, in stops. The shader converts it with `exp2` and applies it
+  before the curve.
+- `paper_white_nits`, the scale from relative scene units to nits. The
+  default is 203, the graphics-white level in ITU-R BT.2408. It is a
+  choice, not a measurement: no API reports it.
+- `peak_nits`, the ceiling the curve rolls off towards. The default is
+  `MaxLuminance`, read after the output has been queried. It stays a
+  slider because EDID values are not always accurate.
+
+The operator is Reinhard with its asymptote moved from 1.0 to the display's
+headroom:
+
+```
+y = x / (1 + x / m)        m = peak_nits / paper_white_nits
+```
+
+For small `x`, `y ≈ x`, so shadows and midtones land on the same nits as a
+linear mapping would put them. For large `x`, `y` approaches `m`, so after
+scaling by `paper_white_nits` the output never exceeds `peak_nits`. SDR
+uses the same function with `m = 1`, which is plain Reinhard, and writes
+the result linearly for the `_SRGB` view to encode. The HDR modes take
+`y × paper_white_nits` as nits. scRGB then divides by 80, because scRGB
+defines 1.0 as 80 nits. HDR10 applies the BT.2087 Rec.709 to Rec.2020
+matrix, divides by 10000 and applies the SMPTE ST 2084 PQ curve.
+
+Because Reinhard bends from zero, scene 1.0 lands at 140 nits rather than
+at `paper_white_nits`. Paper white is the scale of the mapping, not the
+exact level of scene 1.0. That is accepted for now; see Future work.
+
+Extended Reinhard with `L_white = m` was tried first and rejected. Its
+white parameter is the scene value that maps to output 1.0, not a ceiling.
+Scene 2.24 landed on paper white (203 nits), and above that the curve kept
+rising without bound. Scene 7.7 already reached the panel's 455 nits, so
+the display clipped the whole spell core (8 to 20) to one flat level.
 
 `SetHDRMetaData` is not called. Microsoft's guidance is that DWM handles
 windowed presentation itself, and the mastering metadata mattered mainly
@@ -109,7 +146,11 @@ for fullscreen-exclusive.
 
 The debug UI renders into its own SDR target and is composited by the
 tonemap pass at `paper_white_nits`, superseding ADR-0003's note that ImGui
-draws straight into the swapchain.
+draws straight into the swapchain. **Deferred:** not implemented yet. Until
+it is, ImGui draws into the swapchain with its pipeline state rebuilt per
+mode. Its sRGB-encoded colours are read as linear scRGB in one mode and as
+PQ code values in the other, so the UI is wrong in both HDR modes and is
+the one visible difference between them.
 
 Mode selection is manual, from a combo box, with the HDR modes disabled
 while the output reports SDR. Losing HDR mid-session updates the reported
@@ -151,20 +192,121 @@ state and leaves the current mode alone.
 - Auto HDR has to stay off for the executable, or the frame on screen is
   not the frame the renderer produced.
 
+## Validation
+
+The scRGB/HDR10 acceptance test passed on 2026-09-28 for the scene. The UI
+is excluded until it has its own target. Before it passed, the test caught
+two bugs that neither mode would have revealed on its own:
+
+- `peak_nits` was set from `DisplayOutput` in the class's member
+  initialiser, before the output had been queried, so it was 0. The curve
+  divided by zero: lit pixels became `inf` and black ones `NaN`. HDR10 hid
+  most of it, because `saturate` in the PQ encode turns `inf` into 1.0 and
+  `NaN` into 0. scRGB passed both straight to DWM.
+- `exposure` is a slider in stops but was multiplied in as a linear
+  factor. At 0 EV the image went black, and negative EV produced negative
+  colours. The HDR10 path clamps those in `saturate`. scRGB treats negative
+  values as valid out-of-gamut colour, so only that mode showed them.
+
+Two further checks passed:
+
+- Raising `peak_nits` makes the core brighter while UI white and the dark
+  areas barely change.
+- With `peak_nits` equal to `paper_white_nits` (`m = 1`) the HDR image has
+  the same shape as SDR. The brightness still differs, because DWM shows an
+  SDR swapchain at the Windows "SDR content brightness" level, not at
+  `paper_white_nits`. Moving both sliders together until the two modes
+  match measures the desktop's SDR white level on this machine (open
+  question 2).
+
+## Why HDR does not look dramatically different here
+
+Switching between SDR and the HDR modes shows a colour difference but not
+the jump in contrast seen in HDR films or AAA games. On this panel with
+this content, that is expected. The table puts numbers on it, with
+exposure folded into the scene value and the Windows SDR white level
+assumed to equal `paper_white_nits` (203):
+
+| Scene value | SDR | HDR (`m` = 2.24) | HDR / SDR |
+|---|---|---|---|
+| 0.18 (mid grey) | 31 nits | 34 nits | 1.09x |
+| 1.0 | 102 nits | 140 nits | 1.38x |
+| 4 | 162 nits | 292 nits | 1.80x |
+| 12 (spell core) | 187 nits | 384 nits | 2.05x |
+| 20 | 193 nits | 410 nits | 2.12x |
+
+Shadows and midtones are within 10% of each other, and the core is about
+one stop brighter. That one stop is the whole difference. The reasons:
+
+- **The headroom is small.** 455 nits against a 203-nit paper white is 1.2
+  stops. With the same paper white, a 1000-nit panel would put the core at
+  709 nits, 3.8x SDR. Films are mastered at 1000 to 4000 nits. Automatic
+  brightness limiting takes more away as the lit area grows.
+- **Black is not what HDR adds on this panel.** The OLED shows true black in
+  SDR mode too. The curve deliberately leaves everything below paper white
+  alone, so the only place the modes can differ is above it.
+- **The contrast in films and games comes mostly from the curve and the
+  grade, not from HDR.** A filmic curve has a toe that pushes shadows down
+  and a steep midsection, and the colourist grades on top of it. Reinhard
+  has no toe and the flattest midtones of the common operators, so the
+  image looks flat in every mode. The missing punch is the operator, not
+  the output path.
+- **The content barely uses the headroom.** Only pixels above paper white
+  can look different, and the current scene has few of them. There is no
+  bloom yet (M1). Film and game content places speculars, fire and the sun
+  there deliberately.
+- **There is no gamut gain.** Everything is authored in Rec.709. HDR10's
+  Rec.2020 container carries no colours the SDR path cannot also show.
+
+The colour difference that is visible comes from applying the curve per
+channel. A blue core at `(0.5, 2, 12)` becomes `(0.33, 0.67, 0.92)` in SDR:
+blue is 2.8x red instead of 24x, and the colour washes towards white. In
+HDR it becomes `(0.41, 1.06, 1.89)`, blue at 4.6x red, so noticeably more
+of the saturation survives. The HDR modes are more saturated because they
+compress less, not because they show new colours.
+
+## Future work
+
+In rough order of how much each would change the visible result:
+
+1. **A curve with a toe, a linear section and a shoulder.** Uchimura's
+   Gran Turismo operator (CEDEC 2017, "HDR Theory and Practice") is the
+   boring next step because its parameters map directly onto this ADR:
+   maximum brightness is `m`, a linear section can place scene 1.0 exactly
+   on paper white, and a toe adds shadow contrast in SDR and HDR alike.
+   Hable (Uncharted 2), ACES and AgX are the alternatives. ACES needs its
+   output range reinterpreted for a 455-nit ceiling. This is the change
+   that addresses the flat look, and it improves both modes.
+2. **Tonemap luminance or max(R, G, B) instead of each channel.** SDR and
+   HDR would then differ in brightness but keep the same hue and
+   saturation. Very bright saturated colours still need a deliberate path
+   to white or they look unnatural, so this is a look decision as much as
+   a technical one.
+3. **Content that uses the headroom.** Bloom in M1, a core authored well
+   above paper white, and bright areas kept small because of automatic
+   brightness limiting.
+4. **Trade paper white for headroom.** A paper white of 120 to 150 nits
+   buys up to about 0.8 stops more room above it, at the cost of a UI that
+   looks dim beside other windows. Games solve this with a calibration
+   screen: a pattern for the peak, a slider for paper white.
+5. **Show the difference without an HDR screenshot.** A test strip of
+   scene values from 0 to 20, and a false-colour view of output nits, make
+   the SDR clip against the HDR roll-off visible in an ordinary capture
+   for the README.
+
 ## Open questions
 
-1. Does HDR output belong after M1 as its own step, or inside M1? The
-   tonemapper has to exist before any of this can be validated, which
-   argues for after.
-2. `paper_white_nits` default: 200 matches the desktop, so the UI sits at
-   the brightness the rest of Windows uses, and leaves 1.2 stops of
-   headroom. A lower value buys headroom and makes the UI look dim beside
-   other windows. Settle it by comparing against Windows UI white on the
-   panel.
-3. Which tonemap operator maps to nits? An extended Reinhard with its white
-   point at `peak_nits` is the boring starting point; ACES needs its output
-   range reinterpreted rather than used as-is.
+1. ~~Does HDR output belong after M1 or inside it?~~ **Resolved:** done as
+   its own step before the rest of M1. The HDR target and the tonemap pass
+   that M1 needs now exist; the filmic operator (Future work 1) and bloom
+   remain M1 work.
+2. `paper_white_nits` default: **partly resolved.** 203 per BT.2408. Still
+   to do: measure the desktop's SDR white level with the method under
+   Validation, and decide whether the default should match it instead.
+3. ~~Which tonemap operator maps to nits?~~ **Resolved:** Reinhard with its
+   asymptote at `m`; extended Reinhard rejected (see Decision). Next
+   candidate in Future work 1.
 4. Should the debug UI composite at `paper_white_nits` or at the OS SDR
    white level from `DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL`? The
    second matches the desktop exactly and adds a Win32 CCD dependency that
-   nothing else in the project needs.
+   nothing else in the project needs. **Deferred** with the UI target.
