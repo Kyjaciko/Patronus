@@ -238,7 +238,7 @@ void D3D12HelloTriangle::LoadPipeline()
 // Load the sample assets.
 void D3D12HelloTriangle::LoadAssets()
 {
-  D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData {
+  D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData{
     .HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1
   };
 
@@ -340,6 +340,32 @@ void D3D12HelloTriangle::LoadAssets()
       { "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
     };
 
+    // Premultiplied alpha: source RGB is already multiplied by source alpha.
+    // 
+    // See https://learn.microsoft.com/en-us/windows/apps/develop/win2d/premultiplied-alpha:
+    // result = source.RGB + (dest.RGB * (1 - source.A)).
+    D3D12_BLEND_DESC blend_state_scene_texture{
+      .AlphaToCoverageEnable  = FALSE,
+      .IndependentBlendEnable = FALSE,
+      .RenderTarget = {
+        { // Index 0.
+          .BlendEnable           = TRUE,
+          .LogicOpEnable         = FALSE,
+
+          // Internal formula: result = source * SrcBlend OP destination * DestBlend.
+          .SrcBlend              = D3D12_BLEND_ONE,
+          .DestBlend             = D3D12_BLEND_INV_SRC_ALPHA,
+          .BlendOp               = D3D12_BLEND_OP_ADD,
+
+          .SrcBlendAlpha         = D3D12_BLEND_ONE,
+          .DestBlendAlpha        = D3D12_BLEND_INV_SRC_ALPHA,
+          .BlendOpAlpha          = D3D12_BLEND_OP_ADD,
+
+          .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL
+        },
+      }
+    };
+
     // Describe and create the graphics pipeline state object (PSO).
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
@@ -347,7 +373,7 @@ void D3D12HelloTriangle::LoadAssets()
     psoDesc.VS = CD3DX12_SHADER_BYTECODE(pVertexShaderData, vertexShaderDataLength);
     psoDesc.PS = CD3DX12_SHADER_BYTECODE(pPixelShaderData, pixelShaderDataLength);
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    psoDesc.BlendState = blend_state_scene_texture;
     psoDesc.DepthStencilState.DepthEnable = FALSE;
     psoDesc.DepthStencilState.StencilEnable = FALSE;
     psoDesc.SampleMask = UINT_MAX;
@@ -368,6 +394,7 @@ void D3D12HelloTriangle::LoadAssets()
     tonemapPsoDesc.pRootSignature = m_tonemapRootSignature.Get();
     tonemapPsoDesc.VS = CD3DX12_SHADER_BYTECODE(pTonemapVertexShaderData, tonemapVertexShaderDataLength);
     tonemapPsoDesc.PS = CD3DX12_SHADER_BYTECODE(pTonemapPixelShaderData, tonemapPixelShaderDataLength);
+    tonemapPsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
     tonemapPsoDesc.RTVFormats[0] = patronus::renderer::settings::GetOutputFormatDescription(patronus::renderer::settings::OutputFormat::kHdr10).rtv_format;
     COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&tonemapPsoDesc, IID_PPV_ARGS(&m_tonemapHdrPipelineState)), "Failed to create the HDR tonemap pipeline state.");
 

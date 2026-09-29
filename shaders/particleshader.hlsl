@@ -61,10 +61,10 @@ VSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
 
   output.pos = mul(float4(worldPos, 1.f), gViewProj);
 
-  float alpha = p.lifetime ? 1.f : 0.f; // Blend state still needs to be setup to work.
-  //output.color = float4(1.f, saturate(p.lifetime / 10.f), 0.5f, alpha); // 10.f is starting value lifetime.
-  //output.color = float4(0.f, sqrt(p.pos.x * p.pos.x + p.pos.y * p.pos.y + p.pos.z * p.pos.z) / 20.f, sqrt(p.pos.x * p.pos.x + p.pos.y * p.pos.y + p.pos.z * p.pos.z) / 10.f, alpha);
-  output.color = float4(Hash(sqrt(p.pos.x * p.pos.x + p.pos.y * p.pos.y + p.pos.z * p.pos.z) / 10.f), Hash(sqrt(p.pos.x * p.pos.x + p.pos.y * p.pos.y + p.pos.z * p.pos.z)), Hash(sqrt(p.pos.x * p.pos.x + p.pos.y * p.pos.y + p.pos.z * p.pos.z) / 20.f), alpha);
+  float alpha = p.lifetime ? 1.f : 0.f;
+  //output.color = float4(1.f * alpha, saturate(p.lifetime / 10.f) * alpha, 0.5f * alpha, alpha); // 10.f is starting value lifetime.
+  //output.color = float4(0.f, alpha * length(p.pos) / 20.f, alpha * length(p.pos) / 10.f, alpha);
+  output.color = float4(Hash(length(p.pos) / 10.f) * alpha, Hash(length(p.pos)) * alpha, Hash(length(p.pos) / 20.f) * alpha, alpha);
 
   return output;
 }
