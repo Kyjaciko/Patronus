@@ -20,7 +20,7 @@ Camera3D::Camera3D(float fovDegrees, float aspectRatio, float nearZ, float farZ)
 void Camera3D::SetProjectionValues(float fovDegrees, float aspectRatio, float nearZ, float farZ)
 {
 	const float fovRadians = DirectX::XMConvertToRadians(fovDegrees);
-	m_ProjectionMatrix = DirectX::XMMatrixPerspectiveFovRH(fovRadians, aspectRatio, nearZ, farZ);
+	m_ProjectionMatrix = DirectX::XMMatrixPerspectiveFovRH(fovRadians, aspectRatio, farZ, nearZ); // Reverse-Z Depth (near = 1; far = 0).
 }
 
 void Camera3D::SetAspectRatio(float aspectRatio)
