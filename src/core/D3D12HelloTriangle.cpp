@@ -203,6 +203,17 @@ void D3D12HelloTriangle::LoadPipeline()
     COM_ERROR_IF_FAILED(m_device->CreateDescriptorHeap(&particleSrvUavHeapDesc, IID_PPV_ARGS(&m_particleSrvUavHeap)), "Failed to create the particle system descriptor heap.");
 
     m_particleSrvUavDescriptorSize = m_device->GetDescriptorHandleIncrementSize(particleSrvUavHeapDesc.Type);
+
+    D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc {
+      .Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
+      .NumDescriptors = static_cast<UINT>(DepthHeap::Count),
+      .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
+      .NodeMask = 0
+    };
+
+    COM_ERROR_IF_FAILED(m_device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&dsv_heap_)), "Failed to create the depth descriptor heap.");
+
+    dsv_descriptor_size_ = m_device->GetDescriptorHandleIncrementSize(dsvHeapDesc.Type);
   }
 
   // Create frame resources.
@@ -366,6 +377,20 @@ void D3D12HelloTriangle::LoadAssets()
       }
     };
 
+    // Reverse-Z Depth (near = 1; far = 0).
+    D3D12_DEPTH_STENCIL_DESC depth_state_opaque{
+      .DepthEnable    = TRUE,
+      .DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL,
+      .DepthFunc      = D3D12_COMPARISON_FUNC_GREATER,
+      .StencilEnable  = FALSE
+    };
+
+    // Disable depth write so particles don't trim each other away
+    // and to make soft particles possible the depth is used as an SRV,
+    // so the resource is read only which doesn't allow writes.
+    D3D12_DEPTH_STENCIL_DESC depth_state_particles(depth_state_opaque);
+    depth_state_particles.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+
     // Describe and create the graphics pipeline state object (PSO).
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
@@ -374,13 +399,13 @@ void D3D12HelloTriangle::LoadAssets()
     psoDesc.PS = CD3DX12_SHADER_BYTECODE(pPixelShaderData, pixelShaderDataLength);
     psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     psoDesc.BlendState = blend_state_scene_texture;
-    psoDesc.DepthStencilState.DepthEnable = FALSE;
-    psoDesc.DepthStencilState.StencilEnable = FALSE;
+    psoDesc.DepthStencilState = depth_state_opaque;
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets = 1;
     //psoDesc.RTVFormats[0] = patronus::renderer::settings::GetOutputFormatDescription(patronus::renderer::settings::OutputFormat::kHdr10).rtv_format;
     psoDesc.RTVFormats[0] = DXGI_FORMAT_R11G11B10_FLOAT;
+    psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
     psoDesc.SampleDesc.Count = 1;
     COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)), "Failed to create the SDR graphics pipeline state.");
 
@@ -388,6 +413,7 @@ void D3D12HelloTriangle::LoadAssets()
     particlePsoDesc.InputLayout = { nullptr, 0 }; // No vertex input layout, very important since we use SV_VertexID!
     particlePsoDesc.VS = CD3DX12_SHADER_BYTECODE(pParticleVertexShaderData, particleVertexShaderDataLength);
     particlePsoDesc.PS = CD3DX12_SHADER_BYTECODE(pParticlePixelShaderData, particlePixelShaderDataLength);
+    particlePsoDesc.DepthStencilState = depth_state_particles;
     COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&particlePsoDesc, IID_PPV_ARGS(&m_particlePipelineState)), "Failed to create the particle graphics pipeline state.");
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC tonemapPsoDesc(particlePsoDesc);
@@ -395,7 +421,9 @@ void D3D12HelloTriangle::LoadAssets()
     tonemapPsoDesc.VS = CD3DX12_SHADER_BYTECODE(pTonemapVertexShaderData, tonemapVertexShaderDataLength);
     tonemapPsoDesc.PS = CD3DX12_SHADER_BYTECODE(pTonemapPixelShaderData, tonemapPixelShaderDataLength);
     tonemapPsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    tonemapPsoDesc.DepthStencilState.DepthEnable = FALSE;
     tonemapPsoDesc.RTVFormats[0] = patronus::renderer::settings::GetOutputFormatDescription(patronus::renderer::settings::OutputFormat::kHdr10).rtv_format;
+    tonemapPsoDesc.DSVFormat = DXGI_FORMAT_UNKNOWN;
     COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&tonemapPsoDesc, IID_PPV_ARGS(&m_tonemapHdrPipelineState)), "Failed to create the HDR tonemap pipeline state.");
 
     tonemapPsoDesc.RTVFormats[0] = patronus::renderer::settings::GetOutputFormatDescription(patronus::renderer::settings::OutputFormat::kScRGB).rtv_format;
@@ -474,11 +502,14 @@ void D3D12HelloTriangle::LoadAssets()
   // Create the vertex buffer.
   {
     // Define the geometry for a triangle.
+    float distance = 999.f;
+    float ndc_z = 0.1f * (1000.f - distance) / ((1000.f - 0.1f) * distance); // Set the depth to 999.f RELATIVE to the camera NOT world.
+                                                                             // ndc_z = near * (far - d) / ((far - near) * d)
     Vertex triangleVertices[] =
     {
-      { { 0.0f, 0.25f * m_aspectRatio, 0.0f }, { 1.0f, 0.0f, 0.0f, 1.0f } },
-      { { 0.25f, -0.25f * m_aspectRatio, 0.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },
-      { { -0.25f, -0.25f * m_aspectRatio, 0.0f }, { 0.0f, 0.0f, 1.0f, 1.0f } }
+      { { 0.0f, 0.25f * m_aspectRatio, ndc_z }, { 1.0f, 0.0f, 0.0f, 1.0f } },
+      { { 0.25f, -0.25f * m_aspectRatio, ndc_z }, { 0.0f, 1.0f, 0.0f, 1.0f } },
+      { { -0.25f, -0.25f * m_aspectRatio, ndc_z }, { 0.0f, 0.0f, 1.0f, 1.0f } }
     };
 
     const UINT vertexBufferSize = sizeof(triangleVertices);
@@ -958,7 +989,7 @@ void D3D12HelloTriangle::LoadAssets()
         &clear_value,
         IID_PPV_ARGS(&scene_texture_)
       ), 
-      L"Failed to create the timestamp readback buffer."
+      L"Failed to create the HDR scene texture."
     );
 
     // Create the scene texture as a render target.
@@ -986,6 +1017,11 @@ void D3D12HelloTriangle::LoadAssets()
 
     CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(m_particleSrvUavHeap->GetCPUDescriptorHandleForHeapStart(), ParticleHeap::SceneTexture, m_particleSrvUavDescriptorSize);
     m_device->CreateShaderResourceView(scene_texture_.Get(), &srv_description, srvHandle);
+  }
+
+  // Create the depth buffer.
+  {
+    CreateDepthBuffer();
   }
 
   // Create synchronization objects and wait until assets have been uploaded to the GPU.
@@ -1023,7 +1059,7 @@ void D3D12HelloTriangle::LoadAssets()
   // Release the raw curl noise data, since it's now on the GPU (in the default heap).
   m_rawCurlNoiseDataHeap.Reset(); // Allowed to reset here since WaitForGpu() is called before.
   m_particleUploadBuffer.Reset(); //
-  m_indexUploadBuffer.Reset();
+  m_indexUploadBuffer.Reset();    //
 }
 
 // Update frame-based values.
@@ -1286,6 +1322,9 @@ void D3D12HelloTriangle::RefactorPipeline(DXGI_FORMAT swap_chain_format, DXGI_FO
   // Release HDR scene texture.
   scene_texture_.Reset();
 
+  // Release depth buffer.
+  depth_buffer_.Reset();
+
   // Reset the fence values to the current fance value.
   for (UINT n = 0; n < kFramesInFlight; ++n) 
   {
@@ -1355,7 +1394,7 @@ void D3D12HelloTriangle::RefactorPipeline(DXGI_FORMAT swap_chain_format, DXGI_FO
         &clear_value,
         IID_PPV_ARGS(&scene_texture_)
       ), 
-      L"Failed to create the timestamp readback buffer."
+      L"Failed to create the HDR scene texture."
     );
 
     // Create the scene texture as a render target.
@@ -1384,6 +1423,9 @@ void D3D12HelloTriangle::RefactorPipeline(DXGI_FORMAT swap_chain_format, DXGI_FO
     CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(m_particleSrvUavHeap->GetCPUDescriptorHandleForHeapStart(), ParticleHeap::SceneTexture, m_particleSrvUavDescriptorSize);
     m_device->CreateShaderResourceView(scene_texture_.Get(), &srv_description, srvHandle);
   }
+
+  // Resize depth buffer.
+  CreateDepthBuffer();
 
   // Reset Dear ImGui.
   ImGui_ImplWin32_Init(Win32Application::GetHwnd());
@@ -1514,7 +1556,7 @@ void D3D12HelloTriangle::PopulateCommandList()
       m_commandList->RSSetViewports(1, &m_viewport);
       m_commandList->RSSetScissorRects(1, &m_scissorRect);
 
-      // Indicate that the scene texture wil be used as a render target.
+      // Indicate that the scene texture will be used as a render target.
       m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(scene_texture_.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET));
 
       // Change Default Heap (m_particlePool) from UNORDERED_ACCESS to SHADER_RESOURCE.
@@ -1522,13 +1564,22 @@ void D3D12HelloTriangle::PopulateCommandList()
 
       // Set scene texture as render target.
       CD3DX12_CPU_DESCRIPTOR_HANDLE sceneTextureRtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), kSceneTextureIndex, m_rtvDescriptorSize);
-      m_commandList->OMSetRenderTargets(1, &sceneTextureRtvHandle, FALSE, nullptr);
+      CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(dsv_heap_->GetCPUDescriptorHandleForHeapStart());
+      m_commandList->OMSetRenderTargets(1, &sceneTextureRtvHandle, FALSE, &dsvHandle);
 
       // Render triangle.
       m_commandList->ClearRenderTargetView(sceneTextureRtvHandle, clearColor, 0, nullptr);
+      m_commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 0.f, 0u, 0u, nullptr);
       m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
       m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
       m_commandList->DrawInstanced(3, 1, 0, 0);
+
+      // Indicate that the depth buffer will be used as a SRV.
+      m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(depth_buffer_.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+      
+      // Turn OFF depth writes.
+      dsvHandle.Offset(static_cast<UINT>(DepthHeap::Particles), dsv_descriptor_size_);
+      m_commandList->OMSetRenderTargets(1, &sceneTextureRtvHandle, FALSE, &dsvHandle);
 
       // Render particles.
       m_commandList->SetPipelineState(m_particlePipelineState.Get());
@@ -1544,10 +1595,13 @@ void D3D12HelloTriangle::PopulateCommandList()
       m_commandList->DrawIndexedInstanced(6 * kParticleCount, 1, 0, 0, 0);
       m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::RENDER_END);
     
+      // Indicate that the depth buffer will be used as a DSV.
+      m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(depth_buffer_.Get(), D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE));
+
       // Change Default Heap (m_particlePool) from SHADER_RESOURCE to UNORDERED_ACCESS.
       m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
 
-      // Indicate that the scene texture wil be used as a SRV.
+      // Indicate that the scene texture will be used as a SRV.
       m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(scene_texture_.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
     }
 
@@ -1690,4 +1744,59 @@ void D3D12HelloTriangle::EndFrame()
   m_frameIndex = (m_frameIndex + 1) % kFramesInFlight;
 
   ++m_frameNumber;
+}
+
+void D3D12HelloTriangle::CreateDepthBuffer()
+{
+  constexpr DXGI_FORMAT depth_stencil_format   = DXGI_FORMAT_D32_FLOAT;
+  constexpr DXGI_FORMAT resource_format        = DXGI_FORMAT_R32_TYPELESS;
+  constexpr DXGI_FORMAT shader_resource_format = DXGI_FORMAT_R32_FLOAT;
+
+  CD3DX12_RESOURCE_DESC resource_description = CD3DX12_RESOURCE_DESC::Tex2D(resource_format, m_width, m_height, 1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
+  D3D12_CLEAR_VALUE clear_value {
+    .Format       = depth_stencil_format,
+    .DepthStencil = { .Depth = 0.f } // Reverse-Z Depth (near = 1; far = 0).
+  };
+
+  COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+      &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+      D3D12_HEAP_FLAG_NONE,
+      &resource_description,
+      D3D12_RESOURCE_STATE_DEPTH_WRITE,
+      &clear_value,
+      IID_PPV_ARGS(&depth_buffer_)
+    ), 
+    "Failed to create the depth buffer."
+  );
+
+  D3D12_DEPTH_STENCIL_VIEW_DESC dsv_description_opaque{
+    .Format        = depth_stencil_format,
+    .ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D,
+    .Flags         = D3D12_DSV_FLAG_NONE,
+    .Texture2D     = { .MipSlice = 0u }
+  };
+
+  CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(dsv_heap_->GetCPUDescriptorHandleForHeapStart());
+  m_device->CreateDepthStencilView(depth_buffer_.Get(), &dsv_description_opaque, dsvHandle);
+
+  D3D12_DEPTH_STENCIL_VIEW_DESC dsv_description_particles(dsv_description_opaque);
+  dsv_description_particles.Flags = D3D12_DSV_FLAG_READ_ONLY_DEPTH;
+  dsvHandle.Offset(static_cast<UINT>(DepthHeap::Particles), dsv_descriptor_size_);
+  m_device->CreateDepthStencilView(depth_buffer_.Get(), &dsv_description_particles, dsvHandle);
+
+  // Create the depth buffer as a SRV for soft particles.
+  D3D12_SHADER_RESOURCE_VIEW_DESC srv_description {
+    .Format                  = shader_resource_format,
+    .ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D,
+    .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+    .Texture2D = {
+      .MostDetailedMip     = 0u,
+      .MipLevels           = 1u,
+      .PlaneSlice          = 0u,
+      .ResourceMinLODClamp = 0.f
+    }
+  };
+
+  CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(m_particleSrvUavHeap->GetCPUDescriptorHandleForHeapStart(), ParticleHeap::SoftParticle, m_particleSrvUavDescriptorSize);
+  m_device->CreateShaderResourceView(depth_buffer_.Get(), &srv_description, srvHandle);
 }

@@ -100,6 +100,18 @@ private:
   ComPtr<ID3D12Fence> m_fence;
   UINT64 m_fenceValues[kFramesInFlight];
 
+  // Depth.
+  enum class DepthHeap : UINT
+  {
+    Opaque = 0,
+    Particles,
+    Count
+  };
+
+  ComPtr<ID3D12Resource>       depth_buffer_;
+  ComPtr<ID3D12DescriptorHeap> dsv_heap_;
+  UINT                         dsv_descriptor_size_;
+
   // Hardware.
   patronus::renderer::settings::OutputFormat format_{patronus::renderer::settings::OutputFormat::kSdr};
   patronus::hardware::DisplayMode            display_mode_;
@@ -140,6 +152,7 @@ private:
     PoolSRV, // Vertex shader reads the particle data from this buffer.
     DearImGui, // Dear ImGui font texture.
     SceneTexture,
+    SoftParticle,
     Count
   };
 
@@ -219,4 +232,6 @@ private:
   void WaitForGpu();
   void BeginFrame();
   void EndFrame();
+
+  void CreateDepthBuffer();
 };
