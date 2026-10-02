@@ -499,35 +499,79 @@ void D3D12HelloTriangle::LoadAssets()
   // to record yet. The main loop expects it to be closed, so close it now.
   //COM_ERROR_IF_FAILED(m_commandList->Close(), "Failed to close the command list.");
 
-  // Create the vertex buffer.
   {
-    // Define the geometry for a triangle.
-    float distance = 999.f;
-    float ndc_z = 0.1f * (1000.f - distance) / ((1000.f - 0.1f) * distance); // Set the depth to 999.f RELATIVE to the camera NOT world.
-                                                                             // ndc_z = near * (far - d) / ((far - near) * d)
-    Vertex triangleVertices[] =
+    // Create the ground plane.
     {
-      { { 0.0f, 0.25f * m_aspectRatio, ndc_z }, { 1.0f, 0.0f, 0.0f, 1.0f } },
-      { { 0.25f, -0.25f * m_aspectRatio, ndc_z }, { 0.0f, 1.0f, 0.0f, 1.0f } },
-      { { -0.25f, -0.25f * m_aspectRatio, ndc_z }, { 0.0f, 0.0f, 1.0f, 1.0f } }
-    };
+      float kScale = 30.f;
+      Vertex ground_plane_vertices[] =
+      {
+        { { -kScale, 0.f, -kScale }, { 0.0f, 0.0f, 0.0f, 1.0f } },
+        { { kScale, 0.f, -kScale }, { 0.0f, 0.0f, 0.0f, 1.0f } },
+        { { kScale, 0.f, kScale }, { 0.0f, 0.0f, 0.0f, 1.0f } },
+        { { -kScale, 0.f, kScale }, { 0.0f, 0.0f, 0.0f, 1.0f } }
+      };
 
-    const UINT vertexBufferSize = sizeof(triangleVertices);
+      const UINT vertex_buffer_size = sizeof(ground_plane_vertices);
 
-    // Note: using upload heaps to transfer static data like vert buffers is not 
-    // recommended. Every time the GPU needs it, the upload heap will be marshalled 
-    // over. Please read up on Default Heap usage. An upload heap is used here for 
-    // code simplicity and because there are very few verts to actually transfer.
-    COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
-        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-        D3D12_HEAP_FLAG_NONE,
-        &CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize),
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&m_vertexBuffer)
-      ), 
-      "Failed to create the vertex buffer."
-    );
+      // Note: using upload heaps to transfer static data like vert buffers is not 
+      // recommended. Every time the GPU needs it, the upload heap will be marshalled 
+      // over. Please read up on Default Heap usage. An upload heap is used here for 
+      // code simplicity and because there are very few verts to actually transfer.
+      COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+          &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+          D3D12_HEAP_FLAG_NONE,
+          &CD3DX12_RESOURCE_DESC::Buffer(vertex_buffer_size),
+          D3D12_RESOURCE_STATE_GENERIC_READ,
+          nullptr,
+          IID_PPV_ARGS(&m_vertexBuffer)
+        ), 
+        "Failed to create the vertex buffer."
+      );
+    
+      UINT ground_plane_indices[] =
+      {
+        0, 1, 2,
+        2, 3, 0
+      };
+
+      const UINT index_buffer_size = sizeof(ground_plane_indices);
+
+      COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+          &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+          D3D12_HEAP_FLAG_NONE,
+          &CD3DX12_RESOURCE_DESC::Buffer(index_buffer_size),
+          D3D12_RESOURCE_STATE_GENERIC_READ,
+          nullptr,
+          IID_PPV_ARGS(&ground_plane_index_buffer_)
+        ), 
+        "Failed to create the ground plane index buffer."
+      );
+
+      // Copy the ground plane index data to the upload buffer.
+      UINT8* pIndexDataBegin = nullptr;
+      CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
+      COM_ERROR_IF_FAILED(ground_plane_index_buffer_->Map(0, &readRange, reinterpret_cast<void**>(&pIndexDataBegin)), "Failed to map the ground plane index buffer.");
+      memcpy(pIndexDataBegin, ground_plane_indices, index_buffer_size);
+      ground_plane_index_buffer_->Unmap(0, nullptr);
+
+      ground_plane_index_buffer_view_ = {
+        .BufferLocation = ground_plane_index_buffer_->GetGPUVirtualAddress(),
+        .SizeInBytes    = index_buffer_size,
+        .Format         = DXGI_FORMAT_R32_UINT  // UINT = R32_UINT.
+      };
+
+      // Copy the ground plane vertex data to the vertex buffer.
+      UINT8* pVertexDataBegin = nullptr;
+      COM_ERROR_IF_FAILED(m_vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin)), "Failed to map the vertex buffer.");
+      memcpy(pVertexDataBegin, ground_plane_vertices, vertex_buffer_size);
+      m_vertexBuffer->Unmap(0, nullptr);
+
+      m_vertexBufferView = {
+        .BufferLocation = m_vertexBuffer->GetGPUVirtualAddress(),
+        .SizeInBytes    = vertex_buffer_size,
+        .StrideInBytes  = sizeof(Vertex)
+      };
+    }
 
     // Create the index buffer.
     {
@@ -782,7 +826,8 @@ void D3D12HelloTriangle::LoadAssets()
 
       m_particleUploadBuffer->Unmap(0, nullptr);
 
-      m_camera.SetPosition(0.f, 0.f, 20.f);
+      m_camera.SetPosition(0.f, 20.f, 20.f);
+      m_camera.SetLookAtPosition(DirectX::XMFLOAT3(0.f, 0.f, 0.f));
     }
 
     m_commandList->CopyResource(m_particlePool.Get(), m_particleUploadBuffer.Get());
@@ -842,18 +887,6 @@ void D3D12HelloTriangle::LoadAssets()
     // Create the SRV for the vertex shader.
     CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(particleHeap, ParticleHeap::PoolSRV, m_particleSrvUavDescriptorSize);
     m_device->CreateShaderResourceView(m_particlePool.Get(), &srvDesc, srvHandle);
-
-    // Copy the triangle data to the vertex buffer.
-    UINT8* pVertexDataBegin = nullptr;
-    CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
-    COM_ERROR_IF_FAILED(m_vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin)), "Failed to map the vertex buffer.");
-    memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices));
-    m_vertexBuffer->Unmap(0, nullptr);
-
-    // Initialize the vertex buffer view.
-    m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
-    m_vertexBufferView.StrideInBytes = sizeof(Vertex);
-    m_vertexBufferView.SizeInBytes = vertexBufferSize;
   }
 
   // Create the curl noise texture.
@@ -1553,6 +1586,7 @@ void D3D12HelloTriangle::PopulateCommandList()
     {
       m_commandList->SetPipelineState(m_pipelineState.Get());
       m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+      m_commandList->SetGraphicsRootConstantBufferView(0, m_cameraCB[m_frameIndex]->GetGPUVirtualAddress());
       m_commandList->RSSetViewports(1, &m_viewport);
       m_commandList->RSSetScissorRects(1, &m_scissorRect);
 
@@ -1567,12 +1601,13 @@ void D3D12HelloTriangle::PopulateCommandList()
       CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(dsv_heap_->GetCPUDescriptorHandleForHeapStart());
       m_commandList->OMSetRenderTargets(1, &sceneTextureRtvHandle, FALSE, &dsvHandle);
 
-      // Render triangle.
+      // Render ground plane.
       m_commandList->ClearRenderTargetView(sceneTextureRtvHandle, clearColor, 0, nullptr);
       m_commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 0.f, 0u, 0u, nullptr);
       m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
       m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-      m_commandList->DrawInstanced(3, 1, 0, 0);
+      m_commandList->IASetIndexBuffer(&ground_plane_index_buffer_view_);
+      m_commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
 
       // Indicate that the depth buffer will be used as a SRV.
       m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(depth_buffer_.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));

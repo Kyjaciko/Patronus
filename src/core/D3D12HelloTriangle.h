@@ -112,6 +112,10 @@ private:
   ComPtr<ID3D12DescriptorHeap> dsv_heap_;
   UINT                         dsv_descriptor_size_;
 
+  // Ground plane.
+  ComPtr<ID3D12Resource>  ground_plane_index_buffer_;
+  D3D12_INDEX_BUFFER_VIEW ground_plane_index_buffer_view_;
+
   // Hardware.
   patronus::renderer::settings::OutputFormat format_{patronus::renderer::settings::OutputFormat::kSdr};
   patronus::hardware::DisplayMode            display_mode_;
