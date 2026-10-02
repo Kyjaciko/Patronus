@@ -14,7 +14,7 @@ void GameObject3D::SetLookAtPosition(DirectX::XMFLOAT3 lookAtPosition)
 	const float distance = std::sqrt(lookAtPosition.x * lookAtPosition.x + lookAtPosition.z * lookAtPosition.z);
 	const float roll = m_Rotation.z;
 	const float pitch = std::atan2(lookAtPosition.y, distance);
-	const float yaw = std::atan2(lookAtPosition.x, -lookAtPosition.z);
+	const float yaw = std::atan2(-lookAtPosition.x, -lookAtPosition.z);
 
 	SetRotation(pitch, yaw, roll);
 }
