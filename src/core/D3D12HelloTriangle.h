@@ -188,7 +188,13 @@ private:
 
     // 16 bytes.
     DirectX::XMFLOAT3 camUp{};
-    float             _pad{};
+    float             _pad1{};
+
+    // 16 bytes.
+    float cam_near{};
+    float cam_far{};
+    float fade_distance{};
+    float _pad2{};
   };
 
   // Check if 16 byte alignment is met.

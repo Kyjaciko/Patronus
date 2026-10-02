@@ -6,17 +6,23 @@ struct Particle
   float _pad;
 };
 
-StructuredBuffer<Particle> gParticles : register(t0);
+StructuredBuffer<Particle> gParticles   : register(t0);
+Texture2D<float>           gDepthBuffer : register(t1);
 
 cbuffer CameraCB : register(b0)
 {
   row_major float4x4 gViewProj;
 
   float3 gCamRight;
-  float gBillboardSize;
+  float  gBillboardSize;
 
   float3 gCamUp;
-  float gPad;
+  float  gPad1;
+
+  float gCamNear;
+  float gCamFar;
+  float gFadeDistance;
+  float gPad2;
 };
 
 static const float2 QuadCorners[4] = 
@@ -69,7 +75,17 @@ VSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
   return output;
 }
 
+// Reverse-Z depth!
+float LinearizeDepth(float depth)
+{
+  return gCamNear * gCamFar / (depth * (gCamFar - gCamNear) + gCamNear);
+}
+
 float4 PSMain(VSOutput input) : SV_TARGET
 {
-  return input.color;
+  float scene_z    = LinearizeDepth(gDepthBuffer.Load(int3(input.pos.xy, 0)));
+  float particle_z = input.pos.w;
+
+  float fade = saturate((scene_z - particle_z) / gFadeDistance);
+  return input.color * fade;
 }

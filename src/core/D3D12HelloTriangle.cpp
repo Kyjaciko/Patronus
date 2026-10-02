@@ -294,17 +294,18 @@ void D3D12HelloTriangle::LoadAssets()
       D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
       D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
       D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
-      D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS |
-      D3D12_ROOT_SIGNATURE_FLAG_DENY_PIXEL_SHADER_ROOT_ACCESS;
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
 
-    // Define one SRV slot at register t0 for the structured buffer (m_particlePool).
-    CD3DX12_DESCRIPTOR_RANGE1 srvRange;
-    srvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+    // Define two SRV slots at register t0 and t1 for the structured buffer (m_particlePool) and the depth buffer.
+    CD3DX12_DESCRIPTOR_RANGE1 srvRange[2];
+    srvRange[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+    srvRange[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1);
 
     // Put the SRV descriptor and a constant buffer into root parameters and make it visible to the vertex shader.
-    CD3DX12_ROOT_PARAMETER1 rootParameters[2];
+    CD3DX12_ROOT_PARAMETER1 rootParameters[3];
     rootParameters[0].InitAsConstantBufferView(0, 0, D3D12_ROOT_DESCRIPTOR_FLAG_NONE, D3D12_SHADER_VISIBILITY_ALL); // b0
-    rootParameters[1].InitAsDescriptorTable(1, &srvRange, D3D12_SHADER_VISIBILITY_VERTEX);
+    rootParameters[1].InitAsDescriptorTable(1, &srvRange[0], D3D12_SHADER_VISIBILITY_VERTEX); // t0.
+    rootParameters[2].InitAsDescriptorTable(1, &srvRange[1], D3D12_SHADER_VISIBILITY_PIXEL);  // t1.
 
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
     rootSignatureDesc.Init_1_1(_countof(rootParameters), rootParameters, 0, nullptr, rootSignatureFlags);
@@ -1546,6 +1547,10 @@ void D3D12HelloTriangle::UpdateCameraCB(const ComPtr<ID3D12Resource>& camera_con
   pCameraDataBegin->billboardSize = 0.05f;
   DirectX::XMStoreFloat3(&pCameraDataBegin->camUp, m_camera.GetUpVector());
 
+  pCameraDataBegin->cam_near      = 0.1f;
+  pCameraDataBegin->cam_far       = 1000.f;
+  pCameraDataBegin->fade_distance = 0.03f;
+
   camera_constant_buffer->Unmap(0, nullptr);
 }
 
@@ -1622,6 +1627,8 @@ void D3D12HelloTriangle::PopulateCommandList()
       m_commandList->SetGraphicsRootConstantBufferView(0, m_cameraCB[m_frameIndex]->GetGPUVirtualAddress());
       CD3DX12_GPU_DESCRIPTOR_HANDLE srvHandle(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart(), ParticleHeap::PoolSRV, m_particleSrvUavDescriptorSize);
       m_commandList->SetGraphicsRootDescriptorTable(1, srvHandle);
+      CD3DX12_GPU_DESCRIPTOR_HANDLE srvDepthHandle(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart(), ParticleHeap::SoftParticle, m_particleSrvUavDescriptorSize);
+      m_commandList->SetGraphicsRootDescriptorTable(2, srvDepthHandle);
       //m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
       m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // DrawIndexedInstanced()
       m_commandList->IASetIndexBuffer(&m_indexBufferView); // DrawIndexedInstanced()
