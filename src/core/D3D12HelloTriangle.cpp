@@ -435,6 +435,10 @@ void D3D12HelloTriangle::LoadAssets()
 
     free(pVertexShaderData);
     free(pPixelShaderData);
+    free(pParticleVertexShaderData);
+    free(pParticlePixelShaderData);
+    free(pTonemapVertexShaderData);
+    free(pTonemapPixelShaderData);
   }
 
   {
