@@ -35,8 +35,9 @@ static const float2 QuadCorners[4] =
 
 struct VSOutput
 {
-  float4 pos : SV_POSITION;
-  float4 color : COLOR;
+  float4 pos    : SV_POSITION;
+  float4 color  : COLOR;
+  float2 corner : TEXCOORD0;
 };
 
 float Hash(uint seed)
@@ -71,6 +72,7 @@ VSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
   //output.color = float4(1.f * alpha, saturate(p.lifetime / 10.f) * alpha, 0.5f * alpha, alpha); // 10.f is starting value lifetime.
   //output.color = float4(0.f, alpha * length(p.pos) / 20.f, alpha * length(p.pos) / 10.f, alpha);
   output.color = float4(Hash(length(p.pos) / 10.f) * alpha, Hash(length(p.pos)) * alpha, Hash(length(p.pos) / 20.f) * alpha, alpha);
+  output.corner = corner;
 
   return output;
 }
@@ -86,6 +88,21 @@ float4 PSMain(VSOutput input) : SV_TARGET
   float scene_z    = LinearizeDepth(gDepthBuffer.Load(int3(input.pos.xy, 0)));
   float particle_z = input.pos.w;
 
+  float distance_to_center           = length(input.corner);
+  float circle_radius                = 1.f;
+  float smoothstep_transition_region = .1f; // Artistic choice, subtracted from circle radius. Here transition region starts from .9f from the center.
+
+  float smoothstep_transition_region_corrected = smoothstep_transition_region >= fwidth(distance_to_center) ? smoothstep_transition_region : fwidth(distance_to_center); // Artistic choice + anti-aliasing.
+
+  float transition_pixels                      = 1.f; // Transition region is 1 pixel(s) wide, minimum is 1 pixel.
+  float smoothstep_transition_region_in_pixels = transition_pixels * fwidth(distance_to_center); // Anti-aliasing.
+
+  float within_circle = 1.f;
+  //within_circle       = 1.f - step(circle_radius, distance_to_center); // Stepped transition (aliasing).
+  //within_circle       = 1.f - smoothstep(circle_radius - smoothstep_transition_region, circle_radius, distance_to_center); // Smoothstep transition (no guaranteed anti-aliasing!).
+  within_circle       = 1.f - smoothstep(circle_radius - smoothstep_transition_region_corrected, circle_radius, distance_to_center);
+  //within_circle       = 1.f - smoothstep(circle_radius - smoothstep_transition_region_in_pixels, circle_radius, distance_to_center);
+
   float fade = saturate((scene_z - particle_z) / gFadeDistance);
-  return input.color * fade;
+  return input.color * fade * within_circle;
 }

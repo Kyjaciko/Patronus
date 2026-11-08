@@ -88,6 +88,50 @@ Parked deliberately (not blocking M1):
 - ImGui sliders for the simulation constants: deferred to M2, where the
   emitter parameters give them something to tune.
 
+### M1 checklist (hand-written side)
+
+Done:
+
+- [x] HDR scene target, `R11G11B10_FLOAT` ([ADR-0003](adr/0003-hdr-particle-pipeline.md)).
+- [x] Premultiplied blend, `ONE` / `INV_SRC_ALPHA`
+  ([ADR-0006](adr/0006-premultiplied-blend-strategy.md)).
+- [x] Tonemap to SDR, HDR10 and scRGB, with exposure, paper-white and
+  peak-nits controls in ImGui ([ADR-0012](adr/0012-hdr-display-output.md)).
+- [x] Reverse-Z depth and a ground plane
+  ([ADR-0004](adr/0004-reverse-z-depth.md)).
+- [x] Soft particles: scene depth read as SRV through a read-only DSV,
+  linearised, faded over `gFadeDistance`.
+- [x] Radial SDF sprite. The VS passes the quad corner (-1..1) to the PS,
+  which takes `d = length(corner)` per pixel; interpolating a length
+  computed in the VS would give sqrt(2) everywhere. Coverage is
+  `1 - smoothstep(r - w, r, d)` with `r = 1`:
+  - The band lies inside the radius only, so coverage is exactly 0 at the
+    quad edge and the circle is never clipped flat by the quad. Cost: the
+    50% line sits half a band inside `r`.
+  - `w = max(artistic width, fwidth(d))`. The artistic width (0.1 of the
+    radius) sets the look; the `fwidth` floor keeps the band at least one
+    pixel wide, so a pixel centre always lands in it and small particles
+    do not alias. `fwidth` overestimates by up to sqrt(2) on diagonals,
+    which only softens those edges slightly.
+  - When the floor exceeds the radius (particles under about 2 px) the
+    centre no longer reaches full coverage; the particle dims, which
+    matches its sub-pixel coverage.
+
+Open:
+
+- [ ] Occluders: one or two objects the particles pass behind and
+  through. The ground plane alone shows a single intersection line, too
+  little to demonstrate depth testing and soft particles.
+- [ ] Bloom. Write the ADR before the code: resolution chain, before or
+  after tonemap, threshold or not.
+- [ ] Fill-rate curve: GPU ms against billboard size (CSV and plots in
+  `tools/bench/`). Hypothesis to test: at small sizes the curve flattens
+  above what area predicts, because every particle costs whole 2x2
+  quads (helper lanes) and the quad diagonal is shaded by both triangles.
+- [ ] Bloom cost as its own timestamp zone.
+- [ ] PIX overdraw capture.
+- [ ] Devlog and README numbers for M1.
+
 ### Tooling already in place
 
 - `tools/bake_curl_noise.py`: tileable curl volume, scalar noise in alpha,
