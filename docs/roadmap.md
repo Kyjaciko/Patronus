@@ -117,11 +117,14 @@ Done:
     centre no longer reaches full coverage; the particle dims, which
     matches its sub-pixel coverage.
 
+- [x] Occluders: six 1x1x30 poles within 5 units of the orb centre, inside
+  the hollow particle shell (radius 7.5 to 12.5). They pierce the shell
+  top, so particles pass through them (soft particles), and from the
+  start camera they hide the far half of the shell (depth test). Drawn
+  with the opaque PSO before the depth buffer becomes an SRV.
+
 Open:
 
-- [ ] Occluders: one or two objects the particles pass behind and
-  through. The ground plane alone shows a single intersection line, too
-  little to demonstrate depth testing and soft particles.
 - [ ] Bloom. Write the ADR before the code: resolution chain, before or
   after tonemap, threshold or not.
 - [ ] Fill-rate curve: GPU ms against billboard size (CSV and plots in

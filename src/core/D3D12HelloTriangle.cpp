@@ -79,6 +79,64 @@ void D3D12HelloTriangle::OnInit()
   ImGui_ImplDX12_Init(&initInfo);
 }
 
+void D3D12HelloTriangle::CreateOccluders(ComPtr<ID3D12Resource>& vertex_buffer, D3D12_VERTEX_BUFFER_VIEW& vertex_buffer_view, ComPtr<ID3D12Resource>& index_buffer, D3D12_INDEX_BUFFER_VIEW& index_buffer_view, const Vertex* const vertices, const UINT vertices_size, const UINT* const indices, const UINT indices_size)
+{
+  const UINT vertex_buffer_size = sizeof(*vertices) * vertices_size;
+
+  // Note: using upload heaps to transfer static data like vert buffers is not 
+  // recommended. Every time the GPU needs it, the upload heap will be marshalled 
+  // over. Please read up on Default Heap usage. An upload heap is used here for 
+  // code simplicity and because there are very few verts to actually transfer.
+  COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+      &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+      D3D12_HEAP_FLAG_NONE,
+      &CD3DX12_RESOURCE_DESC::Buffer(vertex_buffer_size),
+      D3D12_RESOURCE_STATE_GENERIC_READ,
+      nullptr,
+      IID_PPV_ARGS(&vertex_buffer)
+    ), 
+    "Failed to create the vertex buffer."
+  );
+  
+  const UINT index_buffer_size = sizeof(*indices) * indices_size;
+
+  COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+      &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+      D3D12_HEAP_FLAG_NONE,
+      &CD3DX12_RESOURCE_DESC::Buffer(index_buffer_size),
+      D3D12_RESOURCE_STATE_GENERIC_READ,
+      nullptr,
+      IID_PPV_ARGS(&index_buffer)
+    ), 
+    "Failed to create the index buffer."
+  );
+
+  // Copy the index data to the upload buffer.
+  UINT8* pIndexDataBegin = nullptr;
+  CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
+  COM_ERROR_IF_FAILED(index_buffer->Map(0, &readRange, reinterpret_cast<void**>(&pIndexDataBegin)), "Failed to map the index buffer.");
+  memcpy(pIndexDataBegin, indices, index_buffer_size);
+  index_buffer->Unmap(0, nullptr);
+
+  index_buffer_view = {
+    .BufferLocation = index_buffer->GetGPUVirtualAddress(),
+    .SizeInBytes    = index_buffer_size,
+    .Format         = DXGI_FORMAT_R32_UINT  // UINT = R32_UINT.
+  };
+
+  // Copy the vertex data to the vertex buffer.
+  UINT8* pVertexDataBegin = nullptr;
+  COM_ERROR_IF_FAILED(vertex_buffer->Map(0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin)), "Failed to map the vertex buffer.");
+  memcpy(pVertexDataBegin, vertices, vertex_buffer_size);
+  vertex_buffer->Unmap(0, nullptr);
+
+  vertex_buffer_view = {
+    .BufferLocation = vertex_buffer->GetGPUVirtualAddress(),
+    .SizeInBytes    = vertex_buffer_size,
+    .StrideInBytes  = sizeof(*vertices)
+  };
+}
+
 // Load the rendering pipeline dependencies.
 void D3D12HelloTriangle::LoadPipeline()
 {
@@ -506,76 +564,103 @@ void D3D12HelloTriangle::LoadAssets()
 
   {
     // Create the ground plane.
+    constexpr float kScale = 30.f;
     {
-      float kScale = 30.f;
       Vertex ground_plane_vertices[] =
       {
-        { { -kScale, 0.f, -kScale }, { 0.0f, 0.0f, 0.0f, 1.0f } },
-        { { kScale, 0.f, -kScale }, { 0.0f, 0.0f, 0.0f, 1.0f } },
-        { { kScale, 0.f, kScale }, { 0.0f, 0.0f, 0.0f, 1.0f } },
-        { { -kScale, 0.f, kScale }, { 0.0f, 0.0f, 0.0f, 1.0f } }
+        { { -kScale, 0.f, -kScale }, {0.f, 0.f, 0.f, 1.f} },
+        { { kScale, 0.f, -kScale }, {0.f, 0.f, 0.f, 1.f} },
+        { { kScale, 0.f, kScale }, {0.f, 0.f, 0.f, 1.f} },
+        { { -kScale, 0.f, kScale }, {0.f, 0.f, 0.f, 1.f} }
       };
 
-      const UINT vertex_buffer_size = sizeof(ground_plane_vertices);
-
-      // Note: using upload heaps to transfer static data like vert buffers is not 
-      // recommended. Every time the GPU needs it, the upload heap will be marshalled 
-      // over. Please read up on Default Heap usage. An upload heap is used here for 
-      // code simplicity and because there are very few verts to actually transfer.
-      COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
-          &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-          D3D12_HEAP_FLAG_NONE,
-          &CD3DX12_RESOURCE_DESC::Buffer(vertex_buffer_size),
-          D3D12_RESOURCE_STATE_GENERIC_READ,
-          nullptr,
-          IID_PPV_ARGS(&m_vertexBuffer)
-        ), 
-        "Failed to create the vertex buffer."
-      );
-    
       UINT ground_plane_indices[] =
       {
         0, 1, 2,
         2, 3, 0
       };
 
-      const UINT index_buffer_size = sizeof(ground_plane_indices);
+      CreateOccluders(m_vertexBuffer, m_vertexBufferView, ground_plane_index_buffer_, ground_plane_index_buffer_view_, ground_plane_vertices, sizeof(ground_plane_vertices) / sizeof(*ground_plane_vertices), ground_plane_indices, sizeof(ground_plane_indices) / sizeof(*ground_plane_indices));
+    }
 
-      COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
-          &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-          D3D12_HEAP_FLAG_NONE,
-          &CD3DX12_RESOURCE_DESC::Buffer(index_buffer_size),
-          D3D12_RESOURCE_STATE_GENERIC_READ,
-          nullptr,
-          IID_PPV_ARGS(&ground_plane_index_buffer_)
-        ), 
-        "Failed to create the ground plane index buffer."
-      );
+    // Create the corner poles and 2 random poles.
+    {
+      constexpr float kPoleHeight = kScale;
+      constexpr float kPoleWidth  = 1.f;
+      constexpr float kGroundY    = 0.001f;
 
-      // Copy the ground plane index data to the upload buffer.
-      UINT8* pIndexDataBegin = nullptr;
-      CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
-      COM_ERROR_IF_FAILED(ground_plane_index_buffer_->Map(0, &readRange, reinterpret_cast<void**>(&pIndexDataBegin)), "Failed to map the ground plane index buffer.");
-      memcpy(pIndexDataBegin, ground_plane_indices, index_buffer_size);
-      ground_plane_index_buffer_->Unmap(0, nullptr);
-
-      ground_plane_index_buffer_view_ = {
-        .BufferLocation = ground_plane_index_buffer_->GetGPUVirtualAddress(),
-        .SizeInBytes    = index_buffer_size,
-        .Format         = DXGI_FORMAT_R32_UINT  // UINT = R32_UINT.
+      const XMFLOAT4 pole_colors[] =
+      {
+        {1.f, 0.f, 0.f, 1.f}, // Red
+        {0.f, 1.f, 0.f, 1.f}, // Green
+        {0.f, 0.f, 1.f, 1.f}, // Blue
+        {1.f, 1.f, 0.f, 1.f}, // Yellow
+        {1.f, 0.f, 1.f, 1.f}, // Magenta
+        {0.f, 1.f, 1.f, 1.f}  // Cyan
       };
 
-      // Copy the ground plane vertex data to the vertex buffer.
-      UINT8* pVertexDataBegin = nullptr;
-      COM_ERROR_IF_FAILED(m_vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin)), "Failed to map the vertex buffer.");
-      memcpy(pVertexDataBegin, ground_plane_vertices, vertex_buffer_size);
-      m_vertexBuffer->Unmap(0, nullptr);
-
-      m_vertexBufferView = {
-        .BufferLocation = m_vertexBuffer->GetGPUVirtualAddress(),
-        .SizeInBytes    = vertex_buffer_size,
-        .StrideInBytes  = sizeof(Vertex)
+      const XMFLOAT2 pole_positions[] =
+      {
+        {-3.f,  1.2f},  // Pole 1
+        {.8f,   4.3f},  // Pole 2
+        {0.f,   -2.f},  // Pole 3
+        {-1.5f, -3.4f}, // Pole 4
+        {0.f,   0.f},   // Pole 5
+        {-5.f,  2.5f}   // Pole 6
       };
+
+      const UINT face_indices[][6] =
+      {
+        {0, 1, 2, 0, 2, 3}, // Back
+        {4, 6, 5, 4, 7, 6}, // Front
+        {0, 5, 1, 0, 4, 5}, // Bottom
+        {3, 6, 7, 3, 2, 6}, // Top
+        {0, 7, 4, 0, 3, 7}, // Left
+        {1, 6, 2, 1, 5, 6}  // Right
+      };
+
+      std::vector<Vertex> pole_vertices;
+      std::vector<UINT> pole_indices;
+
+      auto AddPole = [&](float x, float z)
+      {
+        const UINT base = static_cast<UINT>(pole_vertices.size());
+
+        // 8 unique corners.
+        const XMFLOAT3 positions[] =
+        {
+          {x,              kGroundY,    z},
+          {x + kPoleWidth, kGroundY,    z},
+          {x + kPoleWidth, kPoleHeight, z},
+          {x,              kPoleHeight, z},
+
+          {x,              kGroundY,    z + kPoleWidth},
+          {x + kPoleWidth, kGroundY,    z + kPoleWidth},
+          {x + kPoleWidth, kPoleHeight, z + kPoleWidth},
+          {x,              kPoleHeight, z + kPoleWidth}
+        };
+
+        // 6 faces with each having a unique color.
+        for (UINT face = 0; face < 6; ++face)
+        {
+          for (UINT i = 0; i < 6; ++i)
+          {
+            const UINT vertexIndex = face_indices[face][i];
+
+            pole_vertices.push_back({
+              positions[vertexIndex],
+              pole_colors[face]
+            });
+
+            pole_indices.push_back(base + face * 6 + i);
+          }
+        }
+      };
+
+      for (const auto& position : pole_positions)
+        AddPole(position.x, position.y);
+
+      CreateOccluders(pole_vertex_buffer_, pole_vertex_buffer_view_, pole_index_buffer_, pole_index_buffer_view_, pole_vertices.data(), pole_vertices.size(), pole_indices.data(), pole_indices.size());
     }
 
     // Create the index buffer.
@@ -1617,6 +1702,11 @@ void D3D12HelloTriangle::PopulateCommandList()
       m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
       m_commandList->IASetIndexBuffer(&ground_plane_index_buffer_view_);
       m_commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
+
+      // Render poles.
+      m_commandList->IASetVertexBuffers(0, 1, &pole_vertex_buffer_view_);
+      m_commandList->IASetIndexBuffer(&pole_index_buffer_view_);
+      m_commandList->DrawIndexedInstanced(6 * 6 * 6, 1, 0, 0, 0);
 
       // Indicate that the depth buffer will be used as a SRV.
       m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(depth_buffer_.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));

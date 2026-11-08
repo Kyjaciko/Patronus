@@ -116,6 +116,13 @@ private:
   ComPtr<ID3D12Resource>  ground_plane_index_buffer_;
   D3D12_INDEX_BUFFER_VIEW ground_plane_index_buffer_view_;
 
+  // Poles.
+  ComPtr<ID3D12Resource>   pole_vertex_buffer_;
+  D3D12_VERTEX_BUFFER_VIEW pole_vertex_buffer_view_;
+
+  ComPtr<ID3D12Resource>  pole_index_buffer_;
+  D3D12_INDEX_BUFFER_VIEW pole_index_buffer_view_;
+
   // Hardware.
   patronus::renderer::settings::OutputFormat format_{patronus::renderer::settings::OutputFormat::kSdr};
   patronus::hardware::DisplayMode            display_mode_;
@@ -228,6 +235,8 @@ private:
     RENDER_END,
     FRAME_END
   };
+
+  void CreateOccluders(ComPtr<ID3D12Resource>& vertex_buffer, D3D12_VERTEX_BUFFER_VIEW& vertex_buffer_view, ComPtr<ID3D12Resource>& index_buffer, D3D12_INDEX_BUFFER_VIEW& index_buffer_view, const Vertex* const vertices, const UINT vertices_size, const UINT* const indices, const UINT indices_size);
 
   void UpdateCameraCB(const ComPtr<ID3D12Resource>& camera_constant_buffer);
   void ReadTimestamps();
