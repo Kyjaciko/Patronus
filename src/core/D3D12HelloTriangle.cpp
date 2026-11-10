@@ -316,6 +316,60 @@ void D3D12HelloTriangle::LoadAssets()
     featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
   }
 
+  // Create the bloom root signature and the bloom resource.
+  // Only compute shader should have access to the data.
+  {
+    D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags =
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_VERTEX_SHADER_ROOT_ACCESS        |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS          |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS        |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS      |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_PIXEL_SHADER_ROOT_ACCESS         |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_AMPLIFICATION_SHADER_ROOT_ACCESS |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_MESH_SHADER_ROOT_ACCESS;
+
+    // Define one SRV slot at register t0 for reading of the scene_texture or the bloom resource.
+    CD3DX12_DESCRIPTOR_RANGE1 srvRange;
+    srvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+
+    // Define one UAV slot at register u0 for writing the bloom (mip) texture.
+    CD3DX12_DESCRIPTOR_RANGE1 uavRange;
+    uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
+
+    CD3DX12_ROOT_PARAMETER1 rootParameters[3];
+    rootParameters[0].InitAsConstants(sizeof(BloomConstants) / 4, 0, 0, D3D12_SHADER_VISIBILITY_ALL); // register b0.
+    rootParameters[1].InitAsDescriptorTable(1, &srvRange, D3D12_SHADER_VISIBILITY_ALL);
+    rootParameters[2].InitAsDescriptorTable(1, &uavRange, D3D12_SHADER_VISIBILITY_ALL);
+
+    // Register s0 (space0).
+    D3D12_STATIC_SAMPLER_DESC sampler {
+      .Filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+      .AddressU         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+      .AddressV         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+      .AddressW         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+      .MipLODBias       = 0.f,
+      .MaxAnisotropy    = 0,
+      .ComparisonFunc   = D3D12_COMPARISON_FUNC_NEVER,
+      .BorderColor      = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK,
+      .MinLOD           = 0.f,
+      .MaxLOD           = D3D12_FLOAT32_MAX,
+      .ShaderRegister   = 0,
+      .RegisterSpace    = 0,
+      .ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL
+    };
+
+    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
+    rootSignatureDesc.Init_1_1(_countof(rootParameters), rootParameters, 1, &sampler, rootSignatureFlags);
+
+    ComPtr<ID3DBlob> signature;
+    ComPtr<ID3DBlob> error;
+    COM_ERROR_IF_FAILED(D3DX12SerializeVersionedRootSignature(&rootSignatureDesc, featureData.HighestVersion, &signature, &error), "Failed to serialize the root signature.");
+    COM_ERROR_IF_FAILED(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&bloom_root_signature_)), "Failed to create the bloom root signature.");
+  
+    // Create the bloom texture.
+    CreateBloomResource();
+  }
+
   // Create the tonemap root signature.
   // Only pixel shader should have access to the data.
   {
@@ -327,17 +381,37 @@ void D3D12HelloTriangle::LoadAssets()
       D3D12_ROOT_SIGNATURE_FLAG_DENY_AMPLIFICATION_SHADER_ROOT_ACCESS |
       D3D12_ROOT_SIGNATURE_FLAG_DENY_MESH_SHADER_ROOT_ACCESS;
 
-    // Define one SRV slot at register t0 for the scene texture (scene_texture_).
-    CD3DX12_DESCRIPTOR_RANGE1 srvRange;
-    srvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+    // Define two SRV slots at register t0 and t1 for the scene texture (scene_texture_).
+    CD3DX12_DESCRIPTOR_RANGE1 srvRange[2];
+    srvRange[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+    srvRange[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1);
 
-    // Put the SRV descriptor and a constant buffer into root parameters and make it visible to the vertex shader.
-    CD3DX12_ROOT_PARAMETER1 rootParameters[2];
+    // Put the SRV descriptor and rootconstants into root parameters and make it visible to the vertex shader.
+    CD3DX12_ROOT_PARAMETER1 rootParameters[4];
     rootParameters[0].InitAsConstants(4, 0, 0, D3D12_SHADER_VISIBILITY_PIXEL); // register b0.
-    rootParameters[1].InitAsDescriptorTable(1, &srvRange, D3D12_SHADER_VISIBILITY_PIXEL);
+    rootParameters[1].InitAsDescriptorTable(1, &srvRange[0], D3D12_SHADER_VISIBILITY_PIXEL);
+    rootParameters[2].InitAsDescriptorTable(1, &srvRange[1], D3D12_SHADER_VISIBILITY_PIXEL);
+    rootParameters[3].InitAsConstants(sizeof(BloomConstants) / 4, 1, 0, D3D12_SHADER_VISIBILITY_PIXEL); // register b1.
+
+    // Register s0 (space0).
+    D3D12_STATIC_SAMPLER_DESC sampler {
+      .Filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+      .AddressU         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+      .AddressV         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+      .AddressW         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+      .MipLODBias       = 0.f,
+      .MaxAnisotropy    = 0,
+      .ComparisonFunc   = D3D12_COMPARISON_FUNC_NEVER,
+      .BorderColor      = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK,
+      .MinLOD           = 0.f,
+      .MaxLOD           = D3D12_FLOAT32_MAX,
+      .ShaderRegister   = 0,
+      .RegisterSpace    = 0,
+      .ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL
+    };
 
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
-    rootSignatureDesc.Init_1_1(_countof(rootParameters), rootParameters, 0, nullptr, rootSignatureFlags);
+    rootSignatureDesc.Init_1_1(_countof(rootParameters), rootParameters, 1, &sampler, rootSignatureFlags);
 
     ComPtr<ID3DBlob> signature;
     ComPtr<ID3DBlob> error;
@@ -536,6 +610,7 @@ void D3D12HelloTriangle::LoadAssets()
     COM_ERROR_IF_FAILED(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_computeRootSignature)), "Failed to create the compute root signature.");
   }
 
+  // Particle System compute shader.
   {
     UINT8* pComputeShaderData = nullptr;
     UINT computeShaderDataLength = 0;
@@ -550,8 +625,37 @@ void D3D12HelloTriangle::LoadAssets()
       .Flags = D3D12_PIPELINE_STATE_FLAG_NONE
     };
 
-    COM_ERROR_IF_FAILED(m_device->CreateComputePipelineState(&computePsoDesc, IID_PPV_ARGS(&m_computePipelineState)), "Failed to create the compute pipeline state.");
+    COM_ERROR_IF_FAILED(m_device->CreateComputePipelineState(&computePsoDesc, IID_PPV_ARGS(&m_computePipelineState)), "Failed to create the particle system compute pipeline state.");
   
+    free(pComputeShaderData);
+  }
+
+  // Bloom compute shaders.
+  {
+    UINT8* pComputeShaderData = nullptr;
+    UINT computeShaderDataLength = 0;
+
+    // Downsample compute shader.
+    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"shaders_bloom_downsample_CSMain.cso").c_str(), &pComputeShaderData, &computeShaderDataLength), "Failed to read the downsample compute shader.");
+   
+    D3D12_COMPUTE_PIPELINE_STATE_DESC computePsoDesc {
+      .pRootSignature = bloom_root_signature_.Get(),
+      .CS = CD3DX12_SHADER_BYTECODE(pComputeShaderData, computeShaderDataLength),
+      .NodeMask = 0,
+      .CachedPSO = { nullptr, 0 },
+      .Flags = D3D12_PIPELINE_STATE_FLAG_NONE
+    };
+
+    COM_ERROR_IF_FAILED(m_device->CreateComputePipelineState(&computePsoDesc, IID_PPV_ARGS(&bloom_downsample_compute_pipeline_state_)), "Failed to create the bloom downsample compute pipeline state.");
+    free(pComputeShaderData);
+
+    // Upsample compute shader.
+
+    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"shaders_bloom_upsample_CSMain.cso").c_str(), &pComputeShaderData, &computeShaderDataLength), "Failed to read the upsample compute shader.");
+    
+    computePsoDesc.CS = CD3DX12_SHADER_BYTECODE(pComputeShaderData, computeShaderDataLength);
+
+    COM_ERROR_IF_FAILED(m_device->CreateComputePipelineState(&computePsoDesc, IID_PPV_ARGS(&bloom_upsample_compute_pipeline_state_)), "Failed to create the bloom upsample compute pipeline state.");
     free(pComputeShaderData);
   }
 
@@ -969,7 +1073,7 @@ void D3D12HelloTriangle::LoadAssets()
       }
     };
 
-    // Create the UAV for the compute shader.
+    // Create the UAV for the particle system compute shader.
     CD3DX12_CPU_DESCRIPTOR_HANDLE particleHeap(m_particleSrvUavHeap->GetCPUDescriptorHandleForHeapStart());
     CD3DX12_CPU_DESCRIPTOR_HANDLE uavHandle(particleHeap, ParticleHeap::PoolUAV, m_particleSrvUavDescriptorSize);
     m_device->CreateUnorderedAccessView(m_particlePool.Get(), nullptr, &uavDesc, uavHandle);
@@ -1108,7 +1212,7 @@ void D3D12HelloTriangle::LoadAssets()
         &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
         D3D12_HEAP_FLAG_NONE,
         &resource_description,
-        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
         &clear_value,
         IID_PPV_ARGS(&scene_texture_)
       ), 
@@ -1375,6 +1479,31 @@ void D3D12HelloTriangle::OnUpdate()
     ImGui::SliderFloat("Paper white nits", &tonemap_constants_.paper_white_nits, 80.f, 400.f, "%.0f nits");
     ImGui::SliderFloat("Peaks nits      ", &tonemap_constants_.peak_nits, 203.f, 2000.f, "%.0f nits");
     ImGui::End();
+
+    ImGui::Begin("Bloom");
+    ImGui::SeparatorText("Parameters for the bloom effect");
+    static bool enable_bloom_bool = (bloom_constants_.flags & (1u << 0u)) != 0u;
+    ImGui::Checkbox("Enable Bloom     ", &enable_bloom_bool);
+    if (enable_bloom_bool) bloom_constants_.flags |= 1u << 0u;
+    else bloom_constants_.flags &= ~(1u << 0u);
+    ImGui::SliderFloat("Threshold     ", &bloom_constants_.threshold,      0.f, 1.f, "%.5f");
+    ImGui::SliderFloat("Knee          ", &bloom_constants_.knee,           0.f, 1.f, "%.5f");
+    ImGui::SliderFloat("Upsample Scale", &bloom_constants_.upsample_scale, 0.f, 1.f, "%.5f");
+    ImGui::SliderFloat("Intensity     ", &bloom_constants_.intensity,      0.f, 1.f, "%.5f");
+    ImGui::SeparatorText("Debug");
+    static int mip_level = 0;
+    int mip_width  = m_width  >> (mip_level + 1);
+    int mip_height = m_height >> (mip_level + 1);
+
+    char label[64];
+    snprintf(label, sizeof(label), "Mip (%dx%d)", mip_width, mip_height);
+
+    ImGui::SliderInt(label, &mip_level, 0, 4, "%d");
+    ImGui::Image(
+      static_cast<ImTextureID>(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart().ptr + (ParticleHeap::BloomSrv0 + mip_level) * m_particleSrvUavDescriptorSize),
+      ImGui::GetContentRegionAvail()
+    );
+    ImGui::End();
   }
 }
 
@@ -1513,7 +1642,7 @@ void D3D12HelloTriangle::RefactorPipeline(DXGI_FORMAT swap_chain_format, DXGI_FO
         &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
         D3D12_HEAP_FLAG_NONE,
         &resource_description,
-        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
         &clear_value,
         IID_PPV_ARGS(&scene_texture_)
       ), 
@@ -1546,6 +1675,9 @@ void D3D12HelloTriangle::RefactorPipeline(DXGI_FORMAT swap_chain_format, DXGI_FO
     CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(m_particleSrvUavHeap->GetCPUDescriptorHandleForHeapStart(), ParticleHeap::SceneTexture, m_particleSrvUavDescriptorSize);
     m_device->CreateShaderResourceView(scene_texture_.Get(), &srv_description, srvHandle);
   }
+
+  // Resize bloom texture.
+  CreateBloomResource();
 
   // Resize depth buffer.
   CreateDepthBuffer();
@@ -1685,7 +1817,7 @@ void D3D12HelloTriangle::PopulateCommandList()
       m_commandList->RSSetScissorRects(1, &m_scissorRect);
 
       // Indicate that the scene texture will be used as a render target.
-      m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(scene_texture_.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET));
+      m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(scene_texture_.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET));
 
       // Change Default Heap (m_particlePool) from UNORDERED_ACCESS to SHADER_RESOURCE.
       m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
@@ -1738,8 +1870,98 @@ void D3D12HelloTriangle::PopulateCommandList()
       m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
 
       // Indicate that the scene texture will be used as a SRV.
-      m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(scene_texture_.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+      m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(scene_texture_.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
     }
+
+    // Bloom compute pass.
+    const bool enable_bloom = (bloom_constants_.flags & (1u << 0u)) != 0u;
+    if (enable_bloom)
+    {
+      // Indicate that mip0 of the bloom texture will be used as a UAV in the compute shader.
+      m_commandList->ResourceBarrier(1u, &CD3DX12_RESOURCE_BARRIER::Transition(bloom_resource_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, 0u));
+
+      constexpr UINT srv_order[] = {
+        ParticleHeap::SceneTexture,
+        ParticleHeap::BloomSrv0,
+        ParticleHeap::BloomSrv1,
+        ParticleHeap::BloomSrv2,
+        ParticleHeap::BloomSrv3
+      };
+
+      // Downsampling.
+      m_commandList->SetPipelineState(bloom_downsample_compute_pipeline_state_.Get());
+      m_commandList->SetComputeRootSignature(bloom_root_signature_.Get());
+
+      UINT mip = 0u;
+      CD3DX12_GPU_DESCRIPTOR_HANDLE srv_handle, uav_handle;
+      CD3DX12_GPU_DESCRIPTOR_HANDLE particle_heap(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
+
+      for (UINT i = ParticleHeap::BloomUav0; i <= ParticleHeap::BloomUav4; ++i)
+      {
+        mip = i - ParticleHeap::BloomUav0;
+
+        const UINT mip_width  = m_width >> (mip + 1u);
+        const UINT mip_height = m_height >> (mip + 1u);
+
+        bloom_constants_.src_texel_size = { 2.f / static_cast<float>(mip_width), 2.f / static_cast<float>(mip_height)};
+        bloom_constants_.dst_size       = { mip_width, mip_height };
+
+        m_commandList->SetComputeRoot32BitConstants(0u, sizeof(BloomConstants) / 4, &bloom_constants_, 0u);
+
+        srv_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(particle_heap, srv_order[mip], m_particleSrvUavDescriptorSize);
+        uav_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(particle_heap, i,              m_particleSrvUavDescriptorSize);
+
+        m_commandList->SetComputeRootDescriptorTable(1u, srv_handle);
+        m_commandList->SetComputeRootDescriptorTable(2u, uav_handle);
+
+        const UINT thread_group_count_X = (mip_width  + 7u) / 8u; // Round up NOT down, mip0 is half res!
+        const UINT thread_group_count_Y = (mip_height + 7u) / 8u; //
+        m_commandList->Dispatch(thread_group_count_X, thread_group_count_Y, 1u);
+
+        m_commandList->ResourceBarrier(1u, &CD3DX12_RESOURCE_BARRIER::Transition(bloom_resource_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, mip));
+        if (mip < 4u) m_commandList->ResourceBarrier(1u, &CD3DX12_RESOURCE_BARRIER::Transition(bloom_resource_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, mip + 1u));
+
+        bloom_constants_.flags &= ~(1u << 1u); // First pass is passed.
+      }
+
+      // Indicate that mip3 of the bloom texture will be used as a UAV in the compute shader.
+      m_commandList->ResourceBarrier(1u, &CD3DX12_RESOURCE_BARRIER::Transition(bloom_resource_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, 3u));
+
+      // Upsampling.
+      m_commandList->SetPipelineState(bloom_upsample_compute_pipeline_state_.Get());
+      m_commandList->SetComputeRootSignature(bloom_root_signature_.Get());
+
+      for (int i = ParticleHeap::BloomUav3; i >= static_cast<int>(ParticleHeap::BloomUav0); --i)
+      {
+        mip = i - ParticleHeap::BloomUav0;
+
+        const UINT mip_width  = m_width >> (mip + 1u);
+        const UINT mip_height = m_height >> (mip + 1u);
+
+        bloom_constants_.src_texel_size = { 2.f / static_cast<float>(mip_width), 2.f / static_cast<float>(mip_height)};
+        bloom_constants_.dst_size       = { mip_width, mip_height };
+
+        m_commandList->SetComputeRoot32BitConstants(0u, sizeof(BloomConstants) / 4, &bloom_constants_, 0u);
+
+        srv_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(particle_heap, ParticleHeap::BloomSrv1 + mip, m_particleSrvUavDescriptorSize);
+        uav_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(particle_heap, i,                             m_particleSrvUavDescriptorSize);
+
+        m_commandList->SetComputeRootDescriptorTable(1u, srv_handle);
+        m_commandList->SetComputeRootDescriptorTable(2u, uav_handle);
+
+        const UINT thread_group_count_X = (mip_width  + 7u) / 8u; //
+        const UINT thread_group_count_Y = (mip_height + 7u) / 8u; //
+        m_commandList->Dispatch(thread_group_count_X, thread_group_count_Y, 1u);
+
+        m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(bloom_resource_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, mip));
+        if (mip > 0u) m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(bloom_resource_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, mip - 1u));
+      }
+
+      bloom_constants_.flags |= 1u << 1u; // Reset for next time. TODO: use a constant flag (enum class).
+    }
+
+    // Indicate that the bloom texture will be used as a SRV in the pixel shader.
+    m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(bloom_resource_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
 
     // Render to the back buffer.
     {
@@ -1766,8 +1988,15 @@ void D3D12HelloTriangle::PopulateCommandList()
       // Set root parameters.
       m_commandList->SetGraphicsRoot32BitConstants(0, 4, &tonemap_constants_, 0);
 
-      CD3DX12_GPU_DESCRIPTOR_HANDLE sceneTextureSrvHandle(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart(), SceneTexture, m_particleSrvUavDescriptorSize);
+      CD3DX12_GPU_DESCRIPTOR_HANDLE particle_heap(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
+      CD3DX12_GPU_DESCRIPTOR_HANDLE sceneTextureSrvHandle(particle_heap, ParticleHeap::SceneTexture, m_particleSrvUavDescriptorSize);
       m_commandList->SetGraphicsRootDescriptorTable(1, sceneTextureSrvHandle);
+
+      bloom_constants_.dst_size = { m_width, m_height };
+      m_commandList->SetGraphicsRoot32BitConstants(3u, sizeof(BloomConstants) / 4u, &bloom_constants_, 0u);
+
+      CD3DX12_GPU_DESCRIPTOR_HANDLE bloom_texture(particle_heap, ParticleHeap::BloomSrv0, m_particleSrvUavDescriptorSize);
+      m_commandList->SetGraphicsRootDescriptorTable(2u, bloom_texture);
 
       // Indicate that the back buffer will be used as a render target.
       m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_backBufferIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
@@ -1787,6 +2016,7 @@ void D3D12HelloTriangle::PopulateCommandList()
   // Render Dear ImGui on the back buffer.
   {
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
+    m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(bloom_resource_.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
   }
 
   // Indicate that the back buffer will now be used to present.
@@ -1935,4 +2165,66 @@ void D3D12HelloTriangle::CreateDepthBuffer()
 
   CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(m_particleSrvUavHeap->GetCPUDescriptorHandleForHeapStart(), ParticleHeap::SoftParticle, m_particleSrvUavDescriptorSize);
   m_device->CreateShaderResourceView(depth_buffer_.Get(), &srv_description, srvHandle);
+}
+
+void D3D12HelloTriangle::CreateBloomResource()
+{
+  // Assure the window is large enough to support 5 mips.
+  assert((m_width >= 32u && m_height >= 32u) && "Window must be at least 32x32 to support 5 mips for bloom.");
+
+  // Assure there is a 1:1 mapping between the bloom SRV and UAV descriptor indices.
+  static_assert(ParticleHeap::BloomUav0 - ParticleHeap::BloomSrv0 == ParticleHeap::Count - ParticleHeap::BloomUav0, "Bloom SRV and UAV must be in the same order.");
+
+  CD3DX12_CPU_DESCRIPTOR_HANDLE particle_heap(m_particleSrvUavHeap->GetCPUDescriptorHandleForHeapStart());
+  CD3DX12_CPU_DESCRIPTOR_HANDLE srv_handle(particle_heap, ParticleHeap::BloomSrv0, m_particleSrvUavDescriptorSize);
+  CD3DX12_CPU_DESCRIPTOR_HANDLE uav_handle(particle_heap, ParticleHeap::BloomUav0, m_particleSrvUavDescriptorSize);
+  
+  constexpr UINT mip_levels = ParticleHeap::BloomUav4 - ParticleHeap::BloomUav0 + 1;
+
+  // Place the bloom texture in the Default Heap.
+  COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+      &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+      D3D12_HEAP_FLAG_NONE,
+      &CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R11G11B10_FLOAT, m_width/2u, m_height/2u, 1, mip_levels, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS), // Mip0 is half res.
+      D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+      nullptr,
+      IID_PPV_ARGS(&bloom_resource_)
+    ), 
+    "Failed to create the bloom resource."
+  );
+
+  for (UINT i = ParticleHeap::BloomUav0; i <= ParticleHeap::BloomUav4; ++i)
+  {
+    const UINT            mip          = i - ParticleHeap::BloomUav0;
+    constexpr DXGI_FORMAT bloom_format = DXGI_FORMAT_R11G11B10_FLOAT; // scene_texture_.format.
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc {
+      .Format                  = bloom_format,
+      .ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D,
+      .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+      .Texture2D = {
+        .MostDetailedMip     = mip,
+        .MipLevels           = 1u,
+        .PlaneSlice          = 0u,
+        .ResourceMinLODClamp = 0.f
+      }
+    };
+
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc {
+      .Format        = bloom_format,
+      .ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D,
+      .Texture2D = {
+        .MipSlice   = mip,
+        .PlaneSlice = 0u
+      }
+    };
+
+    // Create the SRV for the bloom compute shader.
+    m_device->CreateShaderResourceView(bloom_resource_.Get(), &srv_desc, srv_handle);
+    srv_handle.ptr += m_particleSrvUavDescriptorSize;
+
+    // Create the UAV for the bloom compute shader.
+    m_device->CreateUnorderedAccessView(bloom_resource_.Get(), nullptr, &uav_desc, uav_handle);
+    uav_handle.ptr += m_particleSrvUavDescriptorSize;
+  }
 }

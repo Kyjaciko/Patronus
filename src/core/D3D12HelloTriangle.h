@@ -139,7 +139,7 @@ private:
     uint32_t  output_mode{};
   };
 
-  TonemapConstants tonemap_constants_{
+  TonemapConstants tonemap_constants_ {
     .exposure         = 2.f,   // EV.
     .paper_white_nits = 203.f, // Guideline: ITU-R BT.2408.
     .peak_nits        = 0.f,
@@ -164,6 +164,16 @@ private:
     DearImGui, // Dear ImGui font texture.
     SceneTexture,
     SoftParticle,
+    BloomSrv0,
+    BloomSrv1,
+    BloomSrv2,
+    BloomSrv3,
+    BloomSrv4,
+    BloomUav0,
+    BloomUav1,
+    BloomUav2,
+    BloomUav3,
+    BloomUav4,
     Count
   };
 
@@ -235,6 +245,34 @@ private:
     RENDER_END,
     FRAME_END
   };
+
+  ComPtr<ID3D12Resource>      bloom_resource_;
+  ComPtr<ID3D12RootSignature> bloom_root_signature_;
+  ComPtr<ID3D12PipelineState> bloom_downsample_compute_pipeline_state_;
+  ComPtr<ID3D12PipelineState> bloom_upsample_compute_pipeline_state_;
+
+  struct BloomConstants
+  {
+    DirectX::XMFLOAT2 src_texel_size{}; // UV size of one source texel.
+    DirectX::XMUINT2  dst_size{};       // Size of the destination texture in pixels.
+    float             threshold{};
+    float             knee{};
+    float             upsample_scale{}; // [1..0], 0 = no blur!
+    float             intensity{};
+    uint32_t          flags{};          // 1u << 0u = enable bloom, 1u << 1u = first pass (down0).
+  };
+  static_assert(sizeof(BloomConstants) % 4 == 0, "BloomConstants size should be a multiple of 4 bytes.");
+  static_assert(alignof(BloomConstants) == 4,    "BloomConstants must have 4-byte alignment.");
+
+  BloomConstants bloom_constants_ {
+    .threshold      = .54f,
+    .knee           = .3f,
+    .upsample_scale = 1.f,
+    .intensity      = 1.f,
+    .flags          = 1u << 0u | 1u << 1u,
+  };
+
+  void CreateBloomResource();
 
   void CreateOccluders(ComPtr<ID3D12Resource>& vertex_buffer, D3D12_VERTEX_BUFFER_VIEW& vertex_buffer_view, ComPtr<ID3D12Resource>& index_buffer, D3D12_INDEX_BUFFER_VIEW& index_buffer_view, const Vertex* const vertices, const UINT vertices_size, const UINT* const indices, const UINT indices_size);
 

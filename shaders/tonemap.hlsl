@@ -3,7 +3,9 @@ struct VS_OUTPUT
   float4 pos : SV_POSITION;
 };
 
-Texture2D<float4> HDRTexture : register(t0);
+Texture2D<float4> HDRTexture   : register(t0);
+Texture2D<float4> BloomTexture : register(t1);
+SamplerState      LinearSampler : register(s0);
 
 cbuffer TonemapConstants : register(b0)
 {
@@ -12,6 +14,19 @@ cbuffer TonemapConstants : register(b0)
   float peak_nits;
   uint  output_mode;
 };
+
+cbuffer BloomConstants : register(b1)
+{
+  float2 src_texel_size;
+  uint2  dst_size;
+  float  threshold;
+  float  knee;
+  float  upsample_scale;
+  float  intensity;
+  uint   flags;
+};
+
+static const uint BLOOM_FLAG_ENABLE = 1u << 0u;
 
 // See: https://30fps.net/pages/twotris/.
 static const float2 FullscreenTriangle[3] = 
@@ -91,6 +106,13 @@ float4 PSMain(VS_OUTPUT input) : SV_Target0
 {
   int2 pixel = int2(input.pos.xy);
   float3 hdr = HDRTexture.Load(int3(pixel, 0)).rgb;
+
+  const bool enable_bloom = (flags & BLOOM_FLAG_ENABLE) != 0u;
+  if (enable_bloom)
+  {
+    float2 uv  = input.pos.xy / float2(dst_size);
+    hdr       += intensity * BloomTexture.SampleLevel(LinearSampler, uv, 0).rgb / 5.f; // 5 = mip levels.
+  }
 
   switch(output_mode)
   {

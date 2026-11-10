@@ -246,6 +246,10 @@ patronus_add_shader(D3D12HelloTriangle
   SOURCE shaders/tonemap.hlsl ENTRY VSMain PROFILE vs_6_6 OUTPUT tonemap_shaders_VSMain)
 patronus_add_shader(D3D12HelloTriangle
   SOURCE shaders/tonemap.hlsl ENTRY PSMain PROFILE ps_6_6 OUTPUT tonemap_shaders_PSMain)
+patronus_add_shader(D3D12HelloTriangle
+  SOURCE shaders/bloomshader.hlsl ENTRY DownSample PROFILE cs_6_6 OUTPUT shaders_bloom_downsample_CSMain)
+patronus_add_shader(D3D12HelloTriangle
+  SOURCE shaders/bloomshader.hlsl ENTRY UpSample PROFILE cs_6_6 OUTPUT shaders_bloom_upsample_CSMain)
 
 # Baked assets (assets/) are copied next to the exe as assets/ so the app
 # can load them via GetAssetFullPath(L"assets/...") regardless of the

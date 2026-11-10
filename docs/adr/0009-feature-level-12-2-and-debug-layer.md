@@ -46,6 +46,10 @@ UAV barriers, which the ordinary debug layer does not check).
 - Every capability the roadmap uses can be assumed rather than queried.
   Work graphs are the exception (not part of any feature level) and must
   still be queried through `D3D12_FEATURE_D3D12_OPTIONS21` (ADR-0007).
+  Per-format optional capabilities are a second exception: typed UAV
+  loads of `R11G11B10_FLOAT` (bloom upsample, ADR-0013) are optional at
+  every feature level and must be queried through
+  `D3D12_FEATURE_FORMAT_SUPPORT`.
 - The WARP path requires a WARP that supports 12_2, which depends on the
   Windows build. CI does not run the demo, only the smoke test.
 - The smoke test (`src/rhi/smoketest`) still probes `11_0` so it runs on
