@@ -123,17 +123,26 @@ Done:
   start camera they hide the far half of the shell (depth test). Drawn
   with the opaque PSO before the depth buffer becomes an SRV.
 
+- [x] Bloom: a compute mip chain (half resolution, 5 mips, 13-tap
+  downsample with Karis average and soft-knee threshold on the first
+  level, 3×3 tent upsample) composited before the tonemap
+  ([ADR-0013](adr/0013-bloom-mip-chain.md)). The ADR was written after the
+  code rather than before it.
+- [x] Bloom cost as its own timestamp zones: 25 µs p50 in Release at 720p.
+  The prediction that the first downsample would take about 75% of the
+  downsample time was refuted (58%): the small mips are bound by
+  per-dispatch and per-barrier overhead. See ADR-0013, "Measured".
+
 Open:
 
-- [ ] Bloom. Write the ADR before the code: resolution chain, before or
-  after tonemap, threshold or not.
 - [ ] Fill-rate curve: GPU ms against billboard size (CSV and plots in
   `tools/bench/`). Hypothesis to test: at small sizes the curve flattens
   above what area predicts, because every particle costs whole 2x2
   quads (helper lanes) and the quad diagonal is shaded by both triangles.
-- [ ] Bloom cost as its own timestamp zone.
 - [ ] PIX overdraw capture.
-- [ ] Devlog and README numbers for M1.
+- [ ] Devlog and README numbers for M1. Bloom is done
+  ([devlog](devlog/2026-11-10-m1-bloom.md)); the fill-rate curve and
+  overdraw are still to come.
 
 ### Tooling already in place
 

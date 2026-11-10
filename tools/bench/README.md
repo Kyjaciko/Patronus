@@ -8,7 +8,10 @@ The writer is `patronus::profiling::FrameTimingLog` (`src/profiling/`);
 the D3D12 timestamp queries that feed it, and the two-frame-late readback
 that keeps measurement free of synchronisation, are described in
 ADR-0011. Zones emitted today: `frame` (whole command list), `sim`
-(compute dispatch), `render` (particle draw).
+(compute dispatch), `render` (particle draw), and `bloom` with its parts
+`bloom down 0`, `bloom down rest` and `bloom up` (ADR-0013). The bloom zones
+are written with zero length when bloom is off, so a bloom-off run can be
+compared against a bloom-on run zone by zone.
 
 ## CSV schema
 

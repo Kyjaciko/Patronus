@@ -81,6 +81,15 @@ next milestones. The near-term plan is in [`docs/roadmap.md`](docs/roadmap.md).
   [devlog: GPU particle foundations](docs/devlog/2026-09-12-gpu-particle-foundations.md)
   and [devlog: curl noise & mouse-look](docs/devlog/2026-09-15-curl-noise-and-mouse-look.md).
 
+**Post-processing**
+- Bloom as a compute mip chain on the HDR scene, before the tonemap
+  ([ADR-0012](docs/adr/0012-hdr-display-output.md)). It runs at half
+  resolution with 5 mips. The 13-tap downsample uses a Karis average and a
+  soft-knee threshold on the first level, the upsample is a 3×3 tent, and
+  each mip has its own SRV and UAV with per-subresource barriers. It costs
+  25 µs at 720p on an RX 7800 XT. See [ADR-0013](docs/adr/0013-bloom-mip-chain.md) and
+  [devlog: M1 bloom](docs/devlog/2026-11-10-m1-bloom.md).
+
 **Tooling** (`tools/`, Python, numpy + matplotlib only)
 - `bake_curl_noise.py` — tileable 64³ RGBA16F curl-noise volume (periodic
   lattice noise, wrapping curl stencil, divergence verified numerically),
@@ -164,6 +173,8 @@ The build produces two executables:
   ```
 
   This builds the `Debug` configuration and launches the exe directly.
+  `.\build_and_run.bat Release` (or `RelWithDebInfo`) builds and runs
+  that configuration instead; use it for benchmark numbers.
 
 - **`PatronusSmokeTest.exe`** — a diagnostic that creates a D3D12 device,
   confirms the Agility SDK redistributable and debug layer are active,
@@ -171,9 +182,10 @@ The build produces two executables:
 
 ## Benchmarks
 
-The renderer times three GPU zones per frame with D3D12 timestamp queries:
-`frame` (the whole command list), `sim` (the compute dispatch) and
-`render` (the particle draw). Results are resolved into a readback buffer
+The renderer times its GPU zones per frame with D3D12 timestamp queries:
+`frame` (the whole command list), `sim` (the compute dispatch), `render`
+(the particle draw) and `bloom` (split into `bloom down 0`,
+`bloom down rest` and `bloom up`). Results are resolved into a readback buffer
 and picked up two frames later, after a fence wait the frame loop performs
 anyway, so measuring adds no CPU/GPU synchronisation — see
 [ADR-0011](docs/adr/0011-gpu-timestamp-measurement.md). The samples are
@@ -216,6 +228,26 @@ input-assembler bound, which is where an indexed quad list would pay off.
 Rerun alternating the two paths inside one process, with the billboards
 shrunk so that fill stops dominating. See
 [devlog: M0](docs/devlog/2026-09-19-m0-measurable-baseline.md).
+
+### M1 bloom cost
+
+1M particles, 1280x720, Release, fixed camera, AMD Radeon RX 7800 XT.
+First 1200 frames skipped.
+
+| zone | p50 µs | p95 µs |
+|---|---:|---:|
+| bloom (whole chain) | 25.0 | 32.7 |
+| bloom down 0 (full → half) | 8.3 | 12.9 |
+| bloom down rest (4 dispatches) | 6.0 | 8.5 |
+| bloom up (4 dispatches) | 9.9 | 13.9 |
+
+The prediction was that the first downsample would take about 75% of the
+downsample time, because it reads three times the pixels of all later
+levels together. It takes 58%. The small mips (down to 15 thread groups
+on a 60-CU GPU) cost a near-constant 1.5 to 2.5 µs per dispatch, so they
+are bound by dispatch and barrier overhead, not bandwidth. See
+[ADR-0013](docs/adr/0013-bloom-mip-chain.md) for the analysis and the
+follow-up prediction at 1440p.
 
 ## Documentation
 

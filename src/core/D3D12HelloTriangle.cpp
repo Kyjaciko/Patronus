@@ -1280,7 +1280,7 @@ void D3D12HelloTriangle::LoadAssets()
     };
     
     if (!m_timestampWriter.IsOpen())
-      m_timestampWriter.Open("benchmarks/runs/gpu_timestamps_curl_noise_drawindexedinstanced_6N_1.csv", metadata);
+      m_timestampWriter.Open("benchmarks/runs/gpu_timestamps_bloom.csv", metadata);
   }
 
   // Release the raw curl noise data, since it's now on the GPU (in the default heap).
@@ -1875,6 +1875,7 @@ void D3D12HelloTriangle::PopulateCommandList()
 
     // Bloom compute pass.
     const bool enable_bloom = (bloom_constants_.flags & (1u << 0u)) != 0u;
+    m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::BLOOM_BEGIN);
     if (enable_bloom)
     {
       // Indicate that mip0 of the bloom texture will be used as a UAV in the compute shader.
@@ -1922,7 +1923,11 @@ void D3D12HelloTriangle::PopulateCommandList()
         if (mip < 4u) m_commandList->ResourceBarrier(1u, &CD3DX12_RESOURCE_BARRIER::Transition(bloom_resource_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, mip + 1u));
 
         bloom_constants_.flags &= ~(1u << 1u); // First pass is passed.
+
+        if (mip == 0u) m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::BLOOM_DOWN0_END);
       }
+
+      m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::BLOOM_DOWN_END);
 
       // Indicate that mip3 of the bloom texture will be used as a UAV in the compute shader.
       m_commandList->ResourceBarrier(1u, &CD3DX12_RESOURCE_BARRIER::Transition(bloom_resource_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, 3u));
@@ -1959,9 +1964,15 @@ void D3D12HelloTriangle::PopulateCommandList()
 
       bloom_constants_.flags |= 1u << 1u; // Reset for next time. TODO: use a constant flag (enum class).
     }
+    else // Purely for timestamp queries.
+    {
+      m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::BLOOM_DOWN0_END);
+      m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::BLOOM_DOWN_END);
+    }
 
     // Indicate that the bloom texture will be used as a SRV in the pixel shader.
     m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(bloom_resource_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+    m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::BLOOM_END);
 
     // Render to the back buffer.
     {
@@ -2056,16 +2067,24 @@ void D3D12HelloTriangle::ReadTimestamps()
 
   const UINT64* slots = mappedSlots + queryBase;
 
-  double msFrame  = patronus::utils::TicksToMilliseconds(slots[TimestampSlots::FRAME_BEGIN], slots[TimestampSlots::FRAME_END], m_timestampFrequency);
-  double msSim    = patronus::utils::TicksToMilliseconds(slots[TimestampSlots::SIM_BEGIN], slots[TimestampSlots::SIM_END], m_timestampFrequency);
-  double msRender = patronus::utils::TicksToMilliseconds(slots[TimestampSlots::RENDER_BEGIN], slots[TimestampSlots::RENDER_END], m_timestampFrequency);
+  double msFrame         = patronus::utils::TicksToMilliseconds(slots[TimestampSlots::FRAME_BEGIN],      slots[TimestampSlots::FRAME_END],       m_timestampFrequency);
+  double msSim           = patronus::utils::TicksToMilliseconds(slots[TimestampSlots::SIM_BEGIN],        slots[TimestampSlots::SIM_END],         m_timestampFrequency);
+  double msRender        = patronus::utils::TicksToMilliseconds(slots[TimestampSlots::RENDER_BEGIN],     slots[TimestampSlots::RENDER_END],      m_timestampFrequency);
+  double msBloomDown0    = patronus::utils::TicksToMilliseconds(slots[TimestampSlots::BLOOM_BEGIN],      slots[TimestampSlots::BLOOM_DOWN0_END], m_timestampFrequency);
+  double msBloomDownRest = patronus::utils::TicksToMilliseconds(slots[TimestampSlots::BLOOM_DOWN0_END],  slots[TimestampSlots::BLOOM_DOWN_END],  m_timestampFrequency);
+  double msBloomUp       = patronus::utils::TicksToMilliseconds(slots[TimestampSlots::BLOOM_DOWN_END],   slots[TimestampSlots::BLOOM_END],       m_timestampFrequency);
+  double msBloom         = patronus::utils::TicksToMilliseconds(slots[TimestampSlots::BLOOM_BEGIN],      slots[TimestampSlots::BLOOM_END],       m_timestampFrequency);
 
   CD3DX12_RANGE writeRange(0, 0);
   m_timestampQueryResult->Unmap(0, &writeRange);
 
-  m_timestampWriter.Add(m_frameNumber - kFramesInFlight, "frame", msFrame);
-  m_timestampWriter.Add(m_frameNumber - kFramesInFlight, "sim", msSim);
-  m_timestampWriter.Add(m_frameNumber - kFramesInFlight, "render", msRender);
+  m_timestampWriter.Add(m_frameNumber - kFramesInFlight, "frame",           msFrame);
+  m_timestampWriter.Add(m_frameNumber - kFramesInFlight, "sim",             msSim);
+  m_timestampWriter.Add(m_frameNumber - kFramesInFlight, "render",          msRender);
+  m_timestampWriter.Add(m_frameNumber - kFramesInFlight, "bloom down 0",    msBloomDown0);
+  m_timestampWriter.Add(m_frameNumber - kFramesInFlight, "bloom down rest", msBloomDownRest);
+  m_timestampWriter.Add(m_frameNumber - kFramesInFlight, "bloom up",        msBloomUp);
+  m_timestampWriter.Add(m_frameNumber - kFramesInFlight, "bloom",           msBloom);
 }
 
 void D3D12HelloTriangle::BeginFrame()

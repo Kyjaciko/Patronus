@@ -56,11 +56,15 @@ private:
 
   static constexpr float kMaxDeltaTime = .1f;
 
-  static constexpr UINT kZonesPerFrame = 3; // Zone layout within 1 frame:
-                                            // 0 = frame         1 = sim         2 = render
-  static constexpr UINT kSlotsPerFrame = 6; // Slot layout within 1 frame:
-                                            // 0 = frame begin   1 = sim begin   2 = sim end
-                                            // 3 = render begin  4 = render end  5 = frame end
+  static constexpr UINT kZonesPerFrame = 7;   // Zone layout within 1 frame:
+                                              // 0 = frame            1 = sim              2 = render       
+                                              // 3 = bloom down 0     4 = bloom down rest  5 = bloom up
+                                              // 6 = bloom
+  static constexpr UINT kSlotsPerFrame = 10;  // Slot layout within 1 frame:
+                                              // 0 = frame begin      1 = sim begin        2 = sim end
+                                              // 3 = render begin     4 = render end       5 = bloom begin
+                                              // 6 = bloom down0 end  7 = bloom down end   8 = bloom end
+                                              // 9 = frame end
 
   struct Vertex
   {
@@ -243,6 +247,10 @@ private:
     SIM_END,
     RENDER_BEGIN,
     RENDER_END,
+    BLOOM_BEGIN,
+    BLOOM_DOWN0_END,
+    BLOOM_DOWN_END,
+    BLOOM_END,
     FRAME_END
   };
 

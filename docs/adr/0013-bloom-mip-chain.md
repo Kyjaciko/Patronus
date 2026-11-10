@@ -138,10 +138,53 @@ architecture. These items are known and intentionally left for now:
   end of the bloom block for the next frame, instead of being set per
   dispatch.
 
-### To measure
+### Measured
 
-Bloom gets its own timestamp zone (roadmap M1, ADR-0011). Prediction:
-`down0` takes about 75% of the downsample time, because it reads three
-times as many pixels as all later downsamples together
-(1/4 + 1/16 + … = 1/3). If it comes out much lower, the chain is bound by
-fixed per-dispatch or per-barrier overhead rather than bandwidth.
+Four timestamp zones (ADR-0011): `bloom` around the whole chain,
+including its barriers, and inside it `bloom down 0`, `bloom down rest`
+(`down1`..`down4`) and `bloom up` (`up3`..`up0`). With bloom off, the
+timestamps are still written, so the zones have zero length instead of
+holding stale slots.
+
+Setup: AMD Radeon RX 7800 XT, 1280×720, 1M particles, fixed camera,
+about 19 000 frames per run, of which the first 1200 are skipped (`render`
+settles over roughly 1000 frames). Values are p50 / p95 in µs:
+
+| zone | Release | Debug |
+|---|---:|---:|
+| `bloom` | 25.0 / 32.7 | 35.1 / 41.7 |
+| `bloom down 0` | 8.3 / 12.9 | 11.5 / 15.9 |
+| `bloom down rest` | 6.0 / 8.5 | 8.8 / 10.5 |
+| `bloom up` | 9.9 / 13.9 | 14.7 / 14.8 |
+
+**The prediction was refuted.** It said `down0` would take about 75% of
+the downsample time, because it reads three times as many pixels as all
+later downsamples together (1/4 + 1/16 + … = 1/3). It takes 58% in Release
+and 57% in Debug. As this section predicted for that outcome, the small
+passes are bound by fixed per-dispatch and per-barrier cost, not by
+bandwidth:
+
+- `down rest` costs about 1.5 µs per dispatch, and `up` about 2.5 µs,
+  regardless of size. At 720p, mip 3 is 60 thread groups and mip 4 is 15,
+  on a GPU with 60 compute units. Each barrier drains the GPU before
+  dispatches that cannot fill it again.
+- `down0` moves about 4.6 MB (3.7 MB read, 0.9 MB written) in 8.3 µs,
+  about 550 GB/s. That is close to the card's 624 GB/s DRAM figure, so
+  `down0` behaves like a memory-bound pass. Timestamps cannot tell whether
+  the source came from DRAM or from the 64 MB Infinity Cache.
+
+**Total cost of the feature.** In Debug, `frame` rose by 49 µs at p50
+while the control zone `render` moved by 0.1 µs. About 14 µs of that falls
+outside the `bloom` zone: the extra bilinear sample in the tonemap and the
+transition to `PIXEL_SHADER_RESOURCE`. In Release, the control moved by
+−4.9% (−17.5 µs) between the two runs. That is more than the effect being
+measured, so the Release `frame` delta (−0.2%) is not resolvable. The
+`bloom` zone (25 µs, about 0.15% of a 16.7 ms frame) is the reliable
+Release number.
+
+**Follow-up prediction, not yet run.** At 2560×1440 (4× the pixels),
+`down0` should grow about 4× and `down rest` less than 1.5×. If
+`down rest` also grows about 4×, the overhead explanation is wrong.
+If it holds, the place to save time is the small mips: fewer levels, or a
+single-pass downsampler such as AMD FidelityFX SPD. `down0` is not the
+place.
