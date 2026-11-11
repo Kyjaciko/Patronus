@@ -58,6 +58,60 @@ dedicated texture.
   resource goes to `PIXEL_SHADER_RESOURCE` for the tonemap and back to
   `NON_PIXEL_SHADER_RESOURCE` at the end of the frame.
 
+### Figure 1: resource, views and heap slots
+
+```
+bloom_resource_   R11G11B10_FLOAT   MipLevels = 5   ALLOW_UNORDERED_ACCESS   initial state NPSR
+ ├─ mip0   W/2  × H/2     ◀── SRV[0]   UAV[0]
+ ├─ mip1   W/4  × H/4     ◀── SRV[1]   UAV[1]
+ ├─ mip2   W/8  × H/8     ◀── SRV[2]   UAV[2]
+ ├─ mip3   W/16 × H/16    ◀── SRV[3]   UAV[3]
+ └─ mip4   W/32 × H/32    ◀── SRV[4]   UAV[4]          mip k = (W >> (k+1)) × (H >> (k+1))
+
+scene_texture_    W × H                ◀── SRV (SceneTexture)
+
+m_particleSrvUavHeap
+ [ PoolUAV | CurlNoiseSRV | PoolSRV | DearImGui | SceneTexture | SoftParticle | BloomSrv0..4 | BloomUav0..4 | Count ]
+```
+
+### Figure 2: passes and resource states
+
+```
+          READ (SRV)        WRITE (UAV)       BARRIERS BEFORE
+scene     —                 scene_texture_    scene : PSR|NPSR → RT
+                                              (after) scene : RT → PSR|NPSR
+─────────────────────────────────────────────────────────────────────────────────────
+down0     scene_texture_    mip0              mip0 : NPSR → UAV
+down1     mip0              mip1              mip0 : UAV → NPSR      mip1 : NPSR → UAV
+down2     mip1              mip2              mip1 : UAV → NPSR      mip2 : NPSR → UAV
+down3     mip2              mip3              mip2 : UAV → NPSR      mip3 : NPSR → UAV
+down4     mip3              mip4              mip3 : UAV → NPSR      mip4 : NPSR → UAV
+─────────────────────────────────────────────────────────────────────────────────────
+up3       mip4              mip3  (+=)        mip4 : UAV → NPSR      mip3 : NPSR → UAV
+up2       mip3              mip2  (+=)        mip3 : UAV → NPSR      mip2 : NPSR → UAV
+up1       mip2              mip1  (+=)        mip2 : UAV → NPSR      mip1 : NPSR → UAV
+up0       mip1              mip0  (+=)        mip1 : UAV → NPSR      mip0 : NPSR → UAV
+─────────────────────────────────────────────────────────────────────────────────────
+tonemap   scene + mip0      back buffer       mip0 : UAV → NPSR      all mips : NPSR → PSR
+end       —                 —                 all mips : PSR → NPSR   (after ImGui)
+
+bloom off: only   all mips : NPSR → PSR   and   all mips : PSR → NPSR
+RT = RENDER_TARGET   NPSR = NON_PIXEL_SHADER_RESOURCE (compute reads)   PSR = PIXEL_SHADER_RESOURCE (tonemap / ImGui read)
+```
+
+### Figure 3: timestamp zones in the command stream
+
+```
+◆ BLOOM_BEGIN
+    mip0→UAV   down0   mip0→NPSR   mip1→UAV                         ┐ bloom down 0   ┐
+◆ BLOOM_DOWN0_END                                                   ┘                │
+    down1 … down4   (+ their barriers)                              ┐ bloom down rest│ bloom
+◆ BLOOM_DOWN_END                                                    ┘                │
+    mip3→UAV   up3 … up0   (+ their barriers)   all mips→PSR        ┐ bloom up       │
+◆ BLOOM_END                                                         ┘                ┘
+tonemap (composite)
+```
+
 The bloom is thresholded and added, not CoD's
 `lerp(scene, bloom, ~0.04)`. With a threshold, only light above it glows,
 and that light comes on top of the scene. The lerp variant conserves energy
@@ -140,11 +194,12 @@ architecture. These items are known and intentionally left for now:
 
 ### Measured
 
-Four timestamp zones (ADR-0011): `bloom` around the whole chain,
-including its barriers, and inside it `bloom down 0`, `bloom down rest`
-(`down1`..`down4`) and `bloom up` (`up3`..`up0`). With bloom off, the
-timestamps are still written, so the zones have zero length instead of
-holding stale slots.
+Four timestamp zones (ADR-0011, Figure 3): `bloom` around the whole
+chain, including its barriers and the final transition to
+`PIXEL_SHADER_RESOURCE`, and inside it `bloom down 0`, `bloom down rest`
+(`down1`..`down4`) and `bloom up` (`up3`..`up0` plus that transition).
+With bloom off, the timestamps are still written, so the zones contain
+only the transition (under 1 µs) instead of holding stale slots.
 
 Setup: AMD Radeon RX 7800 XT, 1280×720, 1M particles, fixed camera,
 about 19 000 frames per run, of which the first 1200 are skipped (`render`
@@ -175,8 +230,9 @@ bandwidth:
 
 **Total cost of the feature.** In Debug, `frame` rose by 49 µs at p50
 while the control zone `render` moved by 0.1 µs. About 14 µs of that falls
-outside the `bloom` zone: the extra bilinear sample in the tonemap and the
-transition to `PIXEL_SHADER_RESOURCE`. In Release, the control moved by
+outside the `bloom` zone. All bloom barriers are inside the zone, so the
+most likely cause is the composite in the tonemap pass, which reads one
+extra bilinear sample per full-resolution pixel. In Release, the control moved by
 −4.9% (−17.5 µs) between the two runs. That is more than the effect being
 measured, so the Release `frame` delta (−0.2%) is not resolvable. The
 `bloom` zone (25 µs, about 0.15% of a 16.7 ms frame) is the reliable
