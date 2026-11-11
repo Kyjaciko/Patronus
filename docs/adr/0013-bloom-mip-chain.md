@@ -107,8 +107,9 @@ RT = RENDER_TARGET   NPSR = NON_PIXEL_SHADER_RESOURCE (compute reads)   PSR = PI
 ◆ BLOOM_DOWN0_END                                                   ┘                │
     down1 … down4   (+ their barriers)                              ┐ bloom down rest│ bloom
 ◆ BLOOM_DOWN_END                                                    ┘                │
-    mip3→UAV   up3 … up0   (+ their barriers)   all mips→PSR        ┐ bloom up       │
+    mip3→UAV   up3 … up0   (+ their barriers)                       ┐ bloom up       │
 ◆ BLOOM_END                                                         ┘                ┘
+    all mips→PSR
 tonemap (composite)
 ```
 
@@ -195,11 +196,17 @@ architecture. These items are known and intentionally left for now:
 ### Measured
 
 Four timestamp zones (ADR-0011, Figure 3): `bloom` around the whole
-chain, including its barriers and the final transition to
-`PIXEL_SHADER_RESOURCE`, and inside it `bloom down 0`, `bloom down rest`
-(`down1`..`down4`) and `bloom up` (`up3`..`up0` plus that transition).
-With bloom off, the timestamps are still written, so the zones contain
-only the transition (under 1 µs) instead of holding stale slots.
+chain, including its barriers, and inside it `bloom down 0`,
+`bloom down rest` (`down1`..`down4`) and `bloom up` (`up3`..`up0`). With
+bloom off, the timestamps are still written, so the zones are empty
+instead of holding stale slots.
+
+The runs below were taken with `BLOOM_END` placed *after* the final
+all-mips transition to `PIXEL_SHADER_RESOURCE`, so their `bloom` and
+`bloom up` include that one barrier. In the bloom-off runs that barrier
+was the only thing inside the zone, and it measured under 1 µs. On
+2026-11-11 `BLOOM_END` moved in front of it (Figure 3), so later runs
+measure the chain alone.
 
 Setup: AMD Radeon RX 7800 XT, 1280×720, 1M particles, fixed camera,
 about 19 000 frames per run, of which the first 1200 are skipped (`render`
@@ -230,9 +237,9 @@ bandwidth:
 
 **Total cost of the feature.** In Debug, `frame` rose by 49 µs at p50
 while the control zone `render` moved by 0.1 µs. About 14 µs of that falls
-outside the `bloom` zone. All bloom barriers are inside the zone, so the
-most likely cause is the composite in the tonemap pass, which reads one
-extra bilinear sample per full-resolution pixel. In Release, the control moved by
+outside the `bloom` zone. In those runs every bloom barrier was inside the
+zone, so the most likely cause is the composite in the tonemap pass,
+which reads one extra bilinear sample per full-resolution pixel. In Release, the control moved by
 −4.9% (−17.5 µs) between the two runs. That is more than the effect being
 measured, so the Release `frame` delta (−0.2%) is not resolvable. The
 `bloom` zone (25 µs, about 0.15% of a 16.7 ms frame) is the reliable
