@@ -147,6 +147,16 @@ dust dragged in, then a flash and two line-drawn impact rings. Same tool,
 *3D curl-noise advection with no attracting force — particles scatter
 freely along the divergence-free field.*
 
+| Bloom off | Bloom on |
+| :---: | :---: |
+| ![Scene without bloom](docs/media/bloom_off.png) | ![Scene with bloom](docs/media/bloom_on.png) |
+
+*M1 bloom, same camera. Only HDR values above the soft-knee threshold
+feed the mip chain, so the beams and the particle core glow onto the
+dark room while the room itself adds nothing. 25 µs at 720p on an
+RX 7800 XT — see
+[devlog: M1 bloom](docs/devlog/2026-11-10-m1-bloom.md).*
+
 ## Building
 
 Requires Visual Studio 2022 (with the Desktop C++ workload) and CMake 3.28+.
