@@ -68,6 +68,7 @@ VSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
 
   output.pos = mul(float4(worldPos, 1.f), gViewProj);
 
+  //float alpha = 1.f;
   float alpha = p.lifetime ? 1.f : 0.f;
   //output.color = float4(1.f * alpha, saturate(p.lifetime / 10.f) * alpha, 0.5f * alpha, alpha); // 10.f is starting value lifetime.
   //output.color = float4(0.f, alpha * length(p.pos) / 20.f, alpha * length(p.pos) / 10.f, alpha);

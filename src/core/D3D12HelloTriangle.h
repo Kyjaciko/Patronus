@@ -12,6 +12,7 @@
 #include "Utils.h"
 #include "profiling/FrameTimingWriter.h"
 #include "renderer/GraphicsAdapterManager.h"
+#include "core/particle_system/ParticleSystem.h"
 
 using namespace DirectX;
 
@@ -188,6 +189,8 @@ private:
   ComPtr<ID3D12Resource> m_particlePool; // Pre-allocated structured buffer, to 'remove' dynamic memory allocations in GPU memory.
   ComPtr<ID3D12Resource> m_cameraCB[kFramesInFlight];
   Camera3D m_camera;
+
+  patronus::effects::ParticleSystem particle_system_;
 
   struct Particle
   {

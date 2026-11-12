@@ -160,6 +160,7 @@ add_executable(D3D12HelloTriangle WIN32
   src/core/GameObject3D.cpp
   src/core/Camera3D.cpp
   src/core/D3D12HelloTriangle.cpp
+  src/core/particle_system/ParticleSystem.cpp
   src/rhi/AgilitySDKExports.cpp
 )
 
@@ -250,6 +251,10 @@ patronus_add_shader(D3D12HelloTriangle
   SOURCE shaders/bloomshader.hlsl ENTRY DownSample PROFILE cs_6_6 OUTPUT shaders_bloom_downsample_CSMain)
 patronus_add_shader(D3D12HelloTriangle
   SOURCE shaders/bloomshader.hlsl ENTRY UpSample PROFILE cs_6_6 OUTPUT shaders_bloom_upsample_CSMain)
+patronus_add_shader(D3D12HelloTriangle
+  SOURCE shaders/emitshader.hlsl ENTRY Kickoff PROFILE cs_6_6 OUTPUT shaders_particle_system_kickoff_CS)
+patronus_add_shader(D3D12HelloTriangle
+  SOURCE shaders/emitshader.hlsl ENTRY Emitter PROFILE cs_6_6 OUTPUT shaders_particle_system_emitter_CS)
 
 # Baked assets (assets/) are copied next to the exe as assets/ so the app
 # can load them via GetAssetFullPath(L"assets/...") regardless of the

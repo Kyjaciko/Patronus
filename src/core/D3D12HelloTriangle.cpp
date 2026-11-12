@@ -41,7 +41,7 @@ void D3D12HelloTriangle::OnInit()
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-  io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // Allow Dear ImGui to be outside our window.
+  //io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // Allow Dear ImGui to be outside our window.
 
   ImGui::StyleColorsDark();
   ImGuiStyle& style = ImGui::GetStyle();
@@ -1010,9 +1010,9 @@ void D3D12HelloTriangle::LoadAssets()
             XMStoreFloat3(&pos, XMVectorAdd(centerVec, offset));
 
             pParticleDataBegin[writeIndex++] = {
-              .pos = pos,
+              .pos = { 0.f, 0.f, 0.f },
               .vel = { 0.f, 0.f, 0.f },
-              .lifetime = 10.f // Seconds.
+              .lifetime = 0.f // Seconds.
             };
           }
         }
@@ -1172,6 +1172,8 @@ void D3D12HelloTriangle::LoadAssets()
     }
   }
 
+  particle_system_.Init(m_device.Get(), m_commandList.Get(), m_particlePool.Get());
+
   // Close the command list and execute it to begin the initial GPU setup.
   COM_ERROR_IF_FAILED(m_commandList->Close(), "Failed to close the command list.");
   ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
@@ -1293,7 +1295,9 @@ void D3D12HelloTriangle::LoadAssets()
 void D3D12HelloTriangle::OnUpdate()
 {
   m_timer.Update();
-  m_particleSimConstants.deltaTime = std::min(static_cast<float>(m_timer.GetDeltaTime()), kMaxDeltaTime);
+  const float dt = std::min(static_cast<float>(m_timer.GetDeltaTime()), kMaxDeltaTime);
+  m_particleSimConstants.deltaTime = dt;
+  particle_system_.Update(dt);
 
   // Autorepeat is off, the character is queued once per physical press.
   while (!m_keyboard->IsCharBufferEmpty())
@@ -1504,6 +1508,8 @@ void D3D12HelloTriangle::OnUpdate()
       ImGui::GetContentRegionAvail()
     );
     ImGui::End();
+
+    particle_system_.DrawImGuiWindow();
   }
 }
 
@@ -1518,6 +1524,7 @@ void D3D12HelloTriangle::OnRender()
   // Must be after BeginFrame() 'cause if we're waiting on the fence the GPU is handling frame N-2 
   // and we would otherwise write to the same CB the GPU is reading from.
   UpdateCameraCB(m_cameraCB[m_frameIndex]);
+  particle_system_.UpdateCB(m_frameIndex);
 
   // Capture all Dear ImGui draw data.
   ImGui::Render();
@@ -1786,6 +1793,11 @@ void D3D12HelloTriangle::PopulateCommandList()
   m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::FRAME_BEGIN);
 
   // Compute pass.
+  particle_system_.Compute(m_commandList.Get(), m_frameIndex);
+
+  // Synchronize the particle pool buffer so the displacement shader reads the updated particles.
+  m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(m_particlePool.Get()));
+
   {
     ID3D12DescriptorHeap* ppHeaps[] = { m_particleSrvUavHeap.Get() };
     m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
@@ -1806,7 +1818,7 @@ void D3D12HelloTriangle::PopulateCommandList()
 
   // Graphics pass.
   {
-    const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
+    const float clearColor[] = { 0.001f, 0.001f, 0.001f, 1.0f };
 
     // Render to scene texture.
     {

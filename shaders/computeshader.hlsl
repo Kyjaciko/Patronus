@@ -17,16 +17,19 @@ cbuffer SimulationConstants : register(b0)
 }
 
 // Semi-implicit Euler.
-/*[numthreads(256, 1, 1)]
+[numthreads(256, 1, 1)]
 void CSMain(uint3 id : SV_DispatchThreadID)
 {
   uint i = id.x;
   if (i >= gParticleCount)
     return;
 
-  const float3 gravity = float3(0.f, -9.81f, 0.f);
+  //const float3 gravity = float3(0.f, -9.81f, 0.f);
+  const float3 gravity = float3(0.f, 0.f, 0.f);
 
   Particle p = gParticles[i];
+  if (p.lifetime <= 0.f) return;
+
   p.vel += gravity * gDeltaTime;  // v(t) = v0 + a * t.
   p.pos += p.vel * gDeltaTime;    // x(t) = x0 + v * t.
 
@@ -36,10 +39,10 @@ void CSMain(uint3 id : SV_DispatchThreadID)
   }
 
   gParticles[i] = p;
-}*/
+}
 
 // Curl noise.
-[numthreads(256, 1, 1)]
+/*[numthreads(256, 1, 1)]
 void CSMain(uint3 id : SV_DispatchThreadID)
 {
   uint i = id.x;
@@ -47,6 +50,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     return;
 
   Particle p = gParticles[i];
+  if (p.lifetime <= 0.f) return;
 
   // Tweak this value for faster or slower curls.
   const float curlStrength = 100.f;
@@ -96,4 +100,4 @@ void CSMain(uint3 id : SV_DispatchThreadID)
   }
 
   gParticles[i] = p;
-}
+}*/
