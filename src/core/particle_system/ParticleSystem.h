@@ -29,6 +29,11 @@ namespace patronus::effects
     uint32_t seed{};
   };
 
+  struct SimulateConstants
+  {
+    float delta_time{};
+  };
+
   struct Particle
   {
     DirectX::XMFLOAT3 pos{};
@@ -44,14 +49,19 @@ namespace patronus::effects
 
     static constexpr const wchar_t* kKickoffComputeShaderPath{L"shaders_particle_system_kickoff_CS.cso"};
     static constexpr const wchar_t* kEmitterComputeShaderPath{L"shaders_particle_system_emitter_CS.cso"};
-    //static constexpr wchar_t* kVertexShaderPath{L""};
-    //static constexpr wchar_t* kPixelShaderPath{L""};
+    static constexpr const wchar_t* kSimulateComputeShaderPath{L"shaders_particle_system_simulate_CS.cso"};
+    static constexpr const wchar_t* kVertexShaderPath{L"shaders_particle_system_vertex_shader.cso"};
+    static constexpr const wchar_t* kPixelShaderPath{L"shaders_particle_system_pixel_shader.cso"};
 
+    // kC_... = Compute
+    // kG_... = Graphics
     enum ParticleHeap : uint32_t 
     {
-      kParticles = 0,
-      kDeadList,
-      kCounters,
+      kC_Particles_UAV = 0,
+      kC_DeadList,
+      kC_Counters,
+      kG_Particles_SRV,
+      kG_SoftParticles_DepthBuffer,
       //kAliveList_A,
       //kAliveList_B,
       kCount
@@ -68,13 +78,17 @@ namespace patronus::effects
 
   public:
     ParticleSystem();
-    ~ParticleSystem();
 
-    void Init(_In_ ID3D12Device* const device, _In_ ID3D12GraphicsCommandList* const command_list, _In_ ID3D12Resource* const particle_pool);
+    void Init(_In_ ID3D12Device* const device, _In_ ID3D12GraphicsCommandList* const command_list, _In_ ID3D12Resource* const depth_buffer);
+    void Resize(_In_ ID3D12Device* const device, _In_ ID3D12Resource* const depth_buffer);
+    void ReleaseTemporaryBuffers();
+
+    void CreateGraphicsPipelineState(_In_ ID3D12Device* const device,  _In_ const D3D12_GRAPHICS_PIPELINE_STATE_DESC& standard_graphics_pso, _In_ const D3D12_DEPTH_STENCIL_DESC& standard_depth_stencil);
 
     void Update(_In_ const float delta_time);
     void UpdateCB(_In_ const UINT frame_index);
     void Compute(_In_ ID3D12GraphicsCommandList* const command_list, _In_ const UINT frame_index);
+    void Render(_In_ ID3D12GraphicsCommandList* const command_list, _In_ ID3D12Resource* const camera);
 
     void DrawImGuiWindow();
 
@@ -83,26 +97,36 @@ namespace patronus::effects
     ParticleSystemState system_state_;
     EmitterState        emitter_state_;
     EmitterConstants    emitter_constants_;
+    SimulateConstants   simulate_constants_;
 
-    // Rendering resources (TODO: ParticlSystem shouldn't handle this)
+    // Rendering resources (TODO: ParticleSystem shouldn't handle this)
     UINT                         cbv_srv_uav_descriptor_size_;
     ComPtr<ID3D12DescriptorHeap> cbv_srv_uav_heap_;
+
     ComPtr<ID3D12Resource>       upload_buffer_;
     ComPtr<ID3D12Resource>       emitter_constant_buffer_[kFramesInFlight];
-    ComPtr<ID3D12Resource>       counter_;                     // Holds the how much particles are dead, emitted or alive.
+    ComPtr<ID3D12Resource>       counter_;                     // Holds how much particles are dead, emitted or alive.
     ComPtr<ID3D12Resource>       dead_list_;                   // Holds the index of dead particles, type is uint.
     //ComPtr<ID3D12Resource>       alive_list_[2];             // Holds the index of alive particles, type is uint.
+    ComPtr<ID3D12Resource>       particle_pool_;               // Holds the particles their locations.
 
     ComPtr<ID3D12RootSignature>    cs_root_signature_;
+    ComPtr<ID3D12RootSignature>    graphics_root_signature_;
     ComPtr<ID3D12PipelineState>    kickoff_cs_pipeline_state_;
     ComPtr<ID3D12PipelineState>    emitter_cs_pipeline_state_;
+    ComPtr<ID3D12PipelineState>    simulate_cs_pipeline_state_;
+    ComPtr<ID3D12PipelineState>    graphics_pipeline_state_;
     //ComPtr<ID3D12CommandSignature> cs_command_signature_;
 
     void CreateConstantBuffers(_In_ ID3D12Device* const device);
-    void CreateLists(_In_ ID3D12Device* const device, _In_ ID3D12GraphicsCommandList* const command_list, _In_ ID3D12Resource* const particle_pool);
-    void CreateSignature(_In_ ID3D12Device* const device);
-    void CreatePipelineState(_In_ ID3D12Device* const device, _Out_ ID3D12PipelineState** pipeline_state, _In_ const wchar_t* const compute_shader_path);
-    void CreatePipelineStates(_In_ ID3D12Device* const device);
+    void CreateLists(_In_ ID3D12Device* const device, _In_ ID3D12GraphicsCommandList* const command_list);
+    void CreateParticleBuffer(_In_ ID3D12Device* const device);
+    void CreateDepthBufferView(_In_ ID3D12Device* const device, _In_ ID3D12Resource* const depth_buffer);
+    void CreateSignatures(_In_ ID3D12Device* const device);
+    void CreateComputeSignature(_In_ ID3D12Device* const device, _In_ const D3D12_FEATURE_DATA_ROOT_SIGNATURE& feature_data);
+    void CreateGraphicsSignature(_In_ ID3D12Device* const device, _In_ const D3D12_FEATURE_DATA_ROOT_SIGNATURE& feature_data);
+    void CreateComputePipelineState(_In_ ID3D12Device* const device, _Out_ ID3D12PipelineState** pipeline_state, _In_ const wchar_t* const compute_shader_path);
+    void CreateComputePipelineStates(_In_ ID3D12Device* const device);
 
     // TODO: use the one in DXSample class.
     std::wstring GetAssetFullPath(LPCWSTR assetName)

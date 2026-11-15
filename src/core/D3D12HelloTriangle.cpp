@@ -41,7 +41,7 @@ void D3D12HelloTriangle::OnInit()
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-  //io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // Allow Dear ImGui to be outside our window.
+  io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // Allow Dear ImGui to be outside our window.
 
   ImGui::StyleColorsDark();
   ImGuiStyle& style = ImGui::GetStyle();
@@ -449,141 +449,148 @@ void D3D12HelloTriangle::LoadAssets()
   }
 
   // Create the pipeline state, which includes compiling and loading shaders.
+  UINT8* pVertexShaderData = nullptr;
+  UINT8* pPixelShaderData = nullptr;
+  UINT vertexShaderDataLength = 0;
+  UINT pixelShaderDataLength = 0;
+
+  // Simpel shaders for drawing the triangle.
+  COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"shaders_VSMain.cso").c_str(), &pVertexShaderData, &vertexShaderDataLength), "Failed to read the vertex shader.");
+  COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"shaders_PSMain.cso").c_str(), &pPixelShaderData, &pixelShaderDataLength), "Failed to read the pixel shader.");
+
+  /*UINT8* pParticleVertexShaderData = nullptr;
+  UINT8* pParticlePixelShaderData = nullptr;
+  UINT particleVertexShaderDataLength = 0;
+  UINT particlePixelShaderDataLength = 0;
+
+  // Shaders to draw the particles.
+  COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"particle_shaders_VSMain.cso").c_str(), &pParticleVertexShaderData, &particleVertexShaderDataLength), "Failed to read the particle vertex shader.");
+  COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"particle_shaders_PSMain.cso").c_str(), &pParticlePixelShaderData, &particlePixelShaderDataLength), "Failed to read the particle pixel shader.");
+  */
+
+  UINT8* pTonemapVertexShaderData = nullptr;
+  UINT8* pTonemapPixelShaderData = nullptr;
+  UINT tonemapVertexShaderDataLength = 0;
+  UINT tonemapPixelShaderDataLength = 0;
+
+  // Shader to tonemap.
+  COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"tonemap_shaders_VSMain.cso").c_str(), &pTonemapVertexShaderData, &tonemapVertexShaderDataLength), "Failed to read the particle vertex shader.");
+  COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"tonemap_shaders_PSMain.cso").c_str(), &pTonemapPixelShaderData, &tonemapPixelShaderDataLength), "Failed to read the particle pixel shader.");
+
+  // Define the vertex input layout.
+  D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
   {
-    UINT8* pVertexShaderData = nullptr;
-    UINT8* pPixelShaderData = nullptr;
-    UINT vertexShaderDataLength = 0;
-    UINT pixelShaderDataLength = 0;
+    { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    { "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+  };
 
-    // Simpel shaders for drawing the triangle.
-    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"shaders_VSMain.cso").c_str(), &pVertexShaderData, &vertexShaderDataLength), "Failed to read the vertex shader.");
-    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"shaders_PSMain.cso").c_str(), &pPixelShaderData, &pixelShaderDataLength), "Failed to read the pixel shader.");
+  // Premultiplied alpha: source RGB is already multiplied by source alpha.
+  // 
+  // See https://learn.microsoft.com/en-us/windows/apps/develop/win2d/premultiplied-alpha:
+  // result = source.RGB + (dest.RGB * (1 - source.A)).
+  D3D12_BLEND_DESC blend_state_scene_texture{
+    .AlphaToCoverageEnable  = FALSE,
+    .IndependentBlendEnable = FALSE,
+    .RenderTarget = {
+      { // Index 0.
+        .BlendEnable           = TRUE,
+        .LogicOpEnable         = FALSE,
 
-    UINT8* pParticleVertexShaderData = nullptr;
-    UINT8* pParticlePixelShaderData = nullptr;
-    UINT particleVertexShaderDataLength = 0;
-    UINT particlePixelShaderDataLength = 0;
+        // Internal formula: result = source * SrcBlend OP destination * DestBlend.
+        .SrcBlend              = D3D12_BLEND_ONE,
+        .DestBlend             = D3D12_BLEND_INV_SRC_ALPHA,
+        .BlendOp               = D3D12_BLEND_OP_ADD,
 
-    // Shaders to draw the particles.
-    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"particle_shaders_VSMain.cso").c_str(), &pParticleVertexShaderData, &particleVertexShaderDataLength), "Failed to read the particle vertex shader.");
-    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"particle_shaders_PSMain.cso").c_str(), &pParticlePixelShaderData, &particlePixelShaderDataLength), "Failed to read the particle pixel shader.");
+        .SrcBlendAlpha         = D3D12_BLEND_ONE,
+        .DestBlendAlpha        = D3D12_BLEND_INV_SRC_ALPHA,
+        .BlendOpAlpha          = D3D12_BLEND_OP_ADD,
 
-    UINT8* pTonemapVertexShaderData = nullptr;
-    UINT8* pTonemapPixelShaderData = nullptr;
-    UINT tonemapVertexShaderDataLength = 0;
-    UINT tonemapPixelShaderDataLength = 0;
+        .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL
+      },
+    }
+  };
 
-    // Shader to tonemap.
-    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"tonemap_shaders_VSMain.cso").c_str(), &pTonemapVertexShaderData, &tonemapVertexShaderDataLength), "Failed to read the particle vertex shader.");
-    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(L"tonemap_shaders_PSMain.cso").c_str(), &pTonemapPixelShaderData, &tonemapPixelShaderDataLength), "Failed to read the particle pixel shader.");
+  // Reverse-Z Depth (near = 1; far = 0).
+  D3D12_DEPTH_STENCIL_DESC depth_state_opaque{
+    .DepthEnable    = TRUE,
+    .DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL,
+    .DepthFunc      = D3D12_COMPARISON_FUNC_GREATER,
+    .StencilEnable  = FALSE
+  };
 
-    // Define the vertex input layout.
-    D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
-    {
-      { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-      { "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
-    };
+  // Disable depth write so particles don't trim each other away
+  // and to make soft particles possible the depth is used as an SRV,
+  // so the resource is read only which doesn't allow writes.
+  //D3D12_DEPTH_STENCIL_DESC depth_state_particles(depth_state_opaque);
+  //depth_state_particles.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
 
-    // Premultiplied alpha: source RGB is already multiplied by source alpha.
-    // 
-    // See https://learn.microsoft.com/en-us/windows/apps/develop/win2d/premultiplied-alpha:
-    // result = source.RGB + (dest.RGB * (1 - source.A)).
-    D3D12_BLEND_DESC blend_state_scene_texture{
-      .AlphaToCoverageEnable  = FALSE,
-      .IndependentBlendEnable = FALSE,
-      .RenderTarget = {
-        { // Index 0.
-          .BlendEnable           = TRUE,
-          .LogicOpEnable         = FALSE,
+  // Describe and create the graphics pipeline state object (PSO).
+  D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+  psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
+  psoDesc.pRootSignature = m_rootSignature.Get();
+  psoDesc.VS = CD3DX12_SHADER_BYTECODE(pVertexShaderData, vertexShaderDataLength);
+  psoDesc.PS = CD3DX12_SHADER_BYTECODE(pPixelShaderData, pixelShaderDataLength);
+  psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+  psoDesc.BlendState = blend_state_scene_texture;
+  psoDesc.DepthStencilState = depth_state_opaque;
+  psoDesc.SampleMask = UINT_MAX;
+  psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+  psoDesc.NumRenderTargets = 1;
+  //psoDesc.RTVFormats[0] = patronus::renderer::settings::GetOutputFormatDescription(patronus::renderer::settings::OutputFormat::kHdr10).rtv_format;
+  psoDesc.RTVFormats[0] = DXGI_FORMAT_R11G11B10_FLOAT;
+  psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+  psoDesc.SampleDesc.Count = 1;
+  COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)), "Failed to create the SDR graphics pipeline state.");
 
-          // Internal formula: result = source * SrcBlend OP destination * DestBlend.
-          .SrcBlend              = D3D12_BLEND_ONE,
-          .DestBlend             = D3D12_BLEND_INV_SRC_ALPHA,
-          .BlendOp               = D3D12_BLEND_OP_ADD,
+  /*D3D12_GRAPHICS_PIPELINE_STATE_DESC particlePsoDesc(psoDesc);
+  particlePsoDesc.InputLayout = { nullptr, 0 }; // No vertex input layout, very important since we use SV_VertexID!
+  particlePsoDesc.VS = CD3DX12_SHADER_BYTECODE(pParticleVertexShaderData, particleVertexShaderDataLength);
+  particlePsoDesc.PS = CD3DX12_SHADER_BYTECODE(pParticlePixelShaderData, particlePixelShaderDataLength);
+  particlePsoDesc.DepthStencilState = depth_state_particles;
+  COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&particlePsoDesc, IID_PPV_ARGS(&m_particlePipelineState)), "Failed to create the particle graphics pipeline state.");
+  */
 
-          .SrcBlendAlpha         = D3D12_BLEND_ONE,
-          .DestBlendAlpha        = D3D12_BLEND_INV_SRC_ALPHA,
-          .BlendOpAlpha          = D3D12_BLEND_OP_ADD,
+  D3D12_GRAPHICS_PIPELINE_STATE_DESC tonemapPsoDesc(psoDesc);
+  tonemapPsoDesc.InputLayout = { nullptr, 0 };
+  tonemapPsoDesc.pRootSignature = m_tonemapRootSignature.Get();
+  tonemapPsoDesc.VS = CD3DX12_SHADER_BYTECODE(pTonemapVertexShaderData, tonemapVertexShaderDataLength);
+  tonemapPsoDesc.PS = CD3DX12_SHADER_BYTECODE(pTonemapPixelShaderData, tonemapPixelShaderDataLength);
+  tonemapPsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+  tonemapPsoDesc.DepthStencilState.DepthEnable = FALSE;
+  tonemapPsoDesc.RTVFormats[0] = patronus::renderer::settings::GetOutputFormatDescription(patronus::renderer::settings::OutputFormat::kHdr10).rtv_format;
+  tonemapPsoDesc.DSVFormat = DXGI_FORMAT_UNKNOWN;
+  COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&tonemapPsoDesc, IID_PPV_ARGS(&m_tonemapHdrPipelineState)), "Failed to create the HDR tonemap pipeline state.");
 
-          .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL
-        },
-      }
-    };
+  tonemapPsoDesc.RTVFormats[0] = patronus::renderer::settings::GetOutputFormatDescription(patronus::renderer::settings::OutputFormat::kScRGB).rtv_format;
+  COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&tonemapPsoDesc, IID_PPV_ARGS(&m_tonemapScRgbPipelineState)), "Failed to create the scRGB tonemap pipeline state.");
 
-    // Reverse-Z Depth (near = 1; far = 0).
-    D3D12_DEPTH_STENCIL_DESC depth_state_opaque{
-      .DepthEnable    = TRUE,
-      .DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL,
-      .DepthFunc      = D3D12_COMPARISON_FUNC_GREATER,
-      .StencilEnable  = FALSE
-    };
+  tonemapPsoDesc.RTVFormats[0] = patronus::renderer::settings::GetOutputFormatDescription(patronus::renderer::settings::OutputFormat::kSdr).rtv_format;
+  COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&tonemapPsoDesc, IID_PPV_ARGS(&m_tonemapSdrPipelineState)), "Failed to create the SDR tonemap pipeline state.");
 
-    // Disable depth write so particles don't trim each other away
-    // and to make soft particles possible the depth is used as an SRV,
-    // so the resource is read only which doesn't allow writes.
-    D3D12_DEPTH_STENCIL_DESC depth_state_particles(depth_state_opaque);
-    depth_state_particles.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+  free(pVertexShaderData);
+  free(pPixelShaderData);
+  //free(pParticleVertexShaderData);
+  //free(pParticlePixelShaderData);
+  free(pTonemapVertexShaderData);
+  free(pTonemapPixelShaderData);
 
-    // Describe and create the graphics pipeline state object (PSO).
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
-    psoDesc.pRootSignature = m_rootSignature.Get();
-    psoDesc.VS = CD3DX12_SHADER_BYTECODE(pVertexShaderData, vertexShaderDataLength);
-    psoDesc.PS = CD3DX12_SHADER_BYTECODE(pPixelShaderData, pixelShaderDataLength);
-    psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    psoDesc.BlendState = blend_state_scene_texture;
-    psoDesc.DepthStencilState = depth_state_opaque;
-    psoDesc.SampleMask = UINT_MAX;
-    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 1;
-    //psoDesc.RTVFormats[0] = patronus::renderer::settings::GetOutputFormatDescription(patronus::renderer::settings::OutputFormat::kHdr10).rtv_format;
-    psoDesc.RTVFormats[0] = DXGI_FORMAT_R11G11B10_FLOAT;
-    psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
-    psoDesc.SampleDesc.Count = 1;
-    COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)), "Failed to create the SDR graphics pipeline state.");
-
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC particlePsoDesc(psoDesc);
-    particlePsoDesc.InputLayout = { nullptr, 0 }; // No vertex input layout, very important since we use SV_VertexID!
-    particlePsoDesc.VS = CD3DX12_SHADER_BYTECODE(pParticleVertexShaderData, particleVertexShaderDataLength);
-    particlePsoDesc.PS = CD3DX12_SHADER_BYTECODE(pParticlePixelShaderData, particlePixelShaderDataLength);
-    particlePsoDesc.DepthStencilState = depth_state_particles;
-    COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&particlePsoDesc, IID_PPV_ARGS(&m_particlePipelineState)), "Failed to create the particle graphics pipeline state.");
-
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC tonemapPsoDesc(particlePsoDesc);
-    tonemapPsoDesc.pRootSignature = m_tonemapRootSignature.Get();
-    tonemapPsoDesc.VS = CD3DX12_SHADER_BYTECODE(pTonemapVertexShaderData, tonemapVertexShaderDataLength);
-    tonemapPsoDesc.PS = CD3DX12_SHADER_BYTECODE(pTonemapPixelShaderData, tonemapPixelShaderDataLength);
-    tonemapPsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    tonemapPsoDesc.DepthStencilState.DepthEnable = FALSE;
-    tonemapPsoDesc.RTVFormats[0] = patronus::renderer::settings::GetOutputFormatDescription(patronus::renderer::settings::OutputFormat::kHdr10).rtv_format;
-    tonemapPsoDesc.DSVFormat = DXGI_FORMAT_UNKNOWN;
-    COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&tonemapPsoDesc, IID_PPV_ARGS(&m_tonemapHdrPipelineState)), "Failed to create the HDR tonemap pipeline state.");
-
-    tonemapPsoDesc.RTVFormats[0] = patronus::renderer::settings::GetOutputFormatDescription(patronus::renderer::settings::OutputFormat::kScRGB).rtv_format;
-    COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&tonemapPsoDesc, IID_PPV_ARGS(&m_tonemapScRgbPipelineState)), "Failed to create the scRGB tonemap pipeline state.");
-
-    tonemapPsoDesc.RTVFormats[0] = patronus::renderer::settings::GetOutputFormatDescription(patronus::renderer::settings::OutputFormat::kSdr).rtv_format;
-    COM_ERROR_IF_FAILED(m_device->CreateGraphicsPipelineState(&tonemapPsoDesc, IID_PPV_ARGS(&m_tonemapSdrPipelineState)), "Failed to create the SDR tonemap pipeline state.");
-
-    free(pVertexShaderData);
-    free(pPixelShaderData);
-    free(pParticleVertexShaderData);
-    free(pParticlePixelShaderData);
-    free(pTonemapVertexShaderData);
-    free(pTonemapPixelShaderData);
-  }
-
-  {
+  /*{
     // Define one UAV slot at register u0 for the structured buffer (m_particlePool)
     // and one SRV slot at register t0 for the curl noise texture.
     CD3DX12_DESCRIPTOR_RANGE1 srvUavRange[2];
     srvUavRange[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
     srvUavRange[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
 
+    CD3DX12_DESCRIPTOR_RANGE1 particle_system_range[2];
+    srvUavRange[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 1); // DeadList.
+    srvUavRange[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2); // Counters.
+
     // Put the UAV descriptor into a root parameter and make it visible to the compute shader.
-    CD3DX12_ROOT_PARAMETER1 computeRootParameter[2];
+    CD3DX12_ROOT_PARAMETER1 computeRootParameter[4];
     computeRootParameter[0].InitAsConstants(2, 0, 0, D3D12_SHADER_VISIBILITY_ALL); // Bind particle count and delta time to root constant register 0.
     computeRootParameter[1].InitAsDescriptorTable(2, srvUavRange, D3D12_SHADER_VISIBILITY_ALL);
+    computeRootParameter[2].InitAsDescriptorTable(1, &particle_system_range[0], D3D12_SHADER_VISIBILITY_ALL);
+    computeRootParameter[3].InitAsDescriptorTable(1, &particle_system_range[1], D3D12_SHADER_VISIBILITY_ALL);
 
     D3D12_STATIC_SAMPLER_DESC sampler {
       .Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR,
@@ -628,7 +635,7 @@ void D3D12HelloTriangle::LoadAssets()
     COM_ERROR_IF_FAILED(m_device->CreateComputePipelineState(&computePsoDesc, IID_PPV_ARGS(&m_computePipelineState)), "Failed to create the particle system compute pipeline state.");
   
     free(pComputeShaderData);
-  }
+  }*/
 
   // Bloom compute shaders.
   {
@@ -768,7 +775,7 @@ void D3D12HelloTriangle::LoadAssets()
     }
 
     // Create the index buffer.
-    {
+    /*{
       static constexpr UINT kVerticesPerParticle = 4;
       static constexpr UINT kIndicesPerParticle  = 6;
       const UINT indexCount = kIndicesPerParticle * kParticleCount;
@@ -833,9 +840,9 @@ void D3D12HelloTriangle::LoadAssets()
         .SizeInBytes = indexBufferSize,
         .Format = DXGI_FORMAT_R32_UINT  // uint32_t = R32_UINT.
       };
-    }
+    }*/
 
-    const UINT particlePoolSize = sizeof(Particle) * kParticleCount;
+    /*const UINT particlePoolSize = sizeof(Particle) * kParticleCount;
 
     // Place the particle pool (structured buffer) in the Default Heap.
     COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
@@ -847,10 +854,10 @@ void D3D12HelloTriangle::LoadAssets()
         IID_PPV_ARGS(&m_particlePool)
       ), 
       "Failed to create the particle pool structured buffer."
-    );
+    );*/
 
     // Upload heap to write data to the Default Heap (particle pool).
-    COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
+    /*COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
         &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
         D3D12_HEAP_FLAG_NONE,
         &CD3DX12_RESOURCE_DESC::Buffer(particlePoolSize),
@@ -859,11 +866,11 @@ void D3D12HelloTriangle::LoadAssets()
         IID_PPV_ARGS(&m_particleUploadBuffer)
       ), 
       "Failed to create the vertex buffer."
-    );
+    );*/
 
     // Copy data to upload heap for particle system.
     {
-      Particle* pParticleDataBegin = nullptr;
+      /*Particle* pParticleDataBegin = nullptr;
       CD3DX12_RANGE readRange(0, 0);
       COM_ERROR_IF_FAILED(m_particleUploadBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pParticleDataBegin)), "Failed to map the upload heap for the particle system.");
 
@@ -934,7 +941,7 @@ void D3D12HelloTriangle::LoadAssets()
           .vel = { 0.f, 0.f, 0.f },
           .lifetime = 10.f // Seconds.
         };
-      }*/
+      }
 
       // Uniformly distributed sphere placement,
       // based on Deserno's method for equidistant points on a sphere (2004).
@@ -1016,18 +1023,18 @@ void D3D12HelloTriangle::LoadAssets()
             };
           }
         }
-      }
+      }*/
 
-      m_particleUploadBuffer->Unmap(0, nullptr);
+      //m_particleUploadBuffer->Unmap(0, nullptr);
 
       m_camera.SetPosition(0.f, 20.f, 20.f);
       m_camera.SetLookAtPosition(DirectX::XMFLOAT3(0.f, 0.f, 0.f));
     }
 
-    m_commandList->CopyResource(m_particlePool.Get(), m_particleUploadBuffer.Get());
+    //m_commandList->CopyResource(m_particlePool.Get(), m_particleUploadBuffer.Get());
 
     // Change Default Heap (m_particlePool) from COPY_DEST to UNORDERED_ACCESS.
-    m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
+    //m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
 
     // The constant buffer size (and in that regard also the address) needs to be a multiple of 256 bytes!
     static constexpr UINT cameraSizeCB = (sizeof(CameraCB) + D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT - 1) & ~(D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT - 1);
@@ -1049,7 +1056,7 @@ void D3D12HelloTriangle::LoadAssets()
       UpdateCameraCB(m_cameraCB[i]);
     }
 
-    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc {
+    /*D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc {
       .Format = DXGI_FORMAT_UNKNOWN,
       .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
       .Buffer = {
@@ -1080,7 +1087,7 @@ void D3D12HelloTriangle::LoadAssets()
     
     // Create the SRV for the vertex shader.
     CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(particleHeap, ParticleHeap::PoolSRV, m_particleSrvUavDescriptorSize);
-    m_device->CreateShaderResourceView(m_particlePool.Get(), &srvDesc, srvHandle);
+    m_device->CreateShaderResourceView(m_particlePool.Get(), &srvDesc, srvHandle);*/
   }
 
   // Create the curl noise texture.
@@ -1172,12 +1179,12 @@ void D3D12HelloTriangle::LoadAssets()
     }
   }
 
-  particle_system_.Init(m_device.Get(), m_commandList.Get(), m_particlePool.Get());
+  //particle_system_.Init(m_device.Get(), m_commandList.Get(), depth_buffer_.Get());
 
   // Close the command list and execute it to begin the initial GPU setup.
-  COM_ERROR_IF_FAILED(m_commandList->Close(), "Failed to close the command list.");
-  ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
-  m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+  //COM_ERROR_IF_FAILED(m_commandList->Close(), "Failed to close the command list.");
+  //ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
+  //m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
   // Create the timestamps readback buffer.
   {
@@ -1207,7 +1214,7 @@ void D3D12HelloTriangle::LoadAssets()
     CD3DX12_RESOURCE_DESC resource_description = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R11G11B10_FLOAT, m_width, m_height, 1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
     D3D12_CLEAR_VALUE clear_value {
       .Format = DXGI_FORMAT_R11G11B10_FLOAT,
-      .Color = { 0.0f, 0.2f, 0.4f, 1.0f }
+      .Color  = {clear_color_[0], clear_color_[1], clear_color_[2], clear_color_[3]}
     };
 
     COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
@@ -1253,6 +1260,14 @@ void D3D12HelloTriangle::LoadAssets()
     CreateDepthBuffer();
   }
 
+  particle_system_.Init(m_device.Get(), m_commandList.Get(), depth_buffer_.Get());
+  particle_system_.CreateGraphicsPipelineState(m_device.Get(), psoDesc, depth_state_opaque);
+
+  // Close the command list and execute it to begin the initial GPU setup.
+  COM_ERROR_IF_FAILED(m_commandList->Close(), "Failed to close the command list.");
+  ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
+  m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+
   // Create synchronization objects and wait until assets have been uploaded to the GPU.
   {
     COM_ERROR_IF_FAILED(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)), "Failed to create fence");
@@ -1287,8 +1302,9 @@ void D3D12HelloTriangle::LoadAssets()
 
   // Release the raw curl noise data, since it's now on the GPU (in the default heap).
   m_rawCurlNoiseDataHeap.Reset(); // Allowed to reset here since WaitForGpu() is called before.
-  m_particleUploadBuffer.Reset(); //
+  //m_particleUploadBuffer.Reset(); //
   m_indexUploadBuffer.Reset();    //
+  particle_system_.ReleaseTemporaryBuffers();
 }
 
 // Update frame-based values.
@@ -1296,7 +1312,7 @@ void D3D12HelloTriangle::OnUpdate()
 {
   m_timer.Update();
   const float dt = std::min(static_cast<float>(m_timer.GetDeltaTime()), kMaxDeltaTime);
-  m_particleSimConstants.deltaTime = dt;
+  //m_particleSimConstants.deltaTime = dt;
   particle_system_.Update(dt);
 
   // Autorepeat is off, the character is queued once per physical press.
@@ -1395,17 +1411,17 @@ void D3D12HelloTriangle::OnUpdate()
   if (m_keyboard->IsKeyPressed(VK_SPACE))
 		cameraSpeed = 100.0f;
   if (m_keyboard->IsKeyPressed('Z'))
-    m_camera.AdjustPosition(m_camera.GetForwardVector() * cameraSpeed * m_particleSimConstants.deltaTime);
+    m_camera.AdjustPosition(m_camera.GetForwardVector() * cameraSpeed * dt);
   if (m_keyboard->IsKeyPressed('S'))
-    m_camera.AdjustPosition(m_camera.GetBackwardVector() * cameraSpeed * m_particleSimConstants.deltaTime);
+    m_camera.AdjustPosition(m_camera.GetBackwardVector() * cameraSpeed * dt);
   if (m_keyboard->IsKeyPressed('Q'))
-    m_camera.AdjustPosition(m_camera.GetLeftVector() * cameraSpeed * m_particleSimConstants.deltaTime);
+    m_camera.AdjustPosition(m_camera.GetLeftVector() * cameraSpeed * dt);
   if (m_keyboard->IsKeyPressed('D'))
-    m_camera.AdjustPosition(m_camera.GetRightVector() * cameraSpeed * m_particleSimConstants.deltaTime);
+    m_camera.AdjustPosition(m_camera.GetRightVector() * cameraSpeed * dt);
   if (m_keyboard->IsKeyPressed(VK_SHIFT))
-    m_camera.AdjustPosition(0.f, cameraSpeed * m_particleSimConstants.deltaTime, 0.f);
+    m_camera.AdjustPosition(0.f, cameraSpeed * dt, 0.f);
   if (m_keyboard->IsKeyPressed(VK_CONTROL))
-    m_camera.AdjustPosition(0.f, -cameraSpeed * m_particleSimConstants.deltaTime, 0.f);
+    m_camera.AdjustPosition(0.f, -cameraSpeed * dt, 0.f);
 
   // Enable Dear ImGui recording.
   {
@@ -1642,7 +1658,7 @@ void D3D12HelloTriangle::RefactorPipeline(DXGI_FORMAT swap_chain_format, DXGI_FO
     CD3DX12_RESOURCE_DESC resource_description = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R11G11B10_FLOAT, m_width, m_height, 1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
     D3D12_CLEAR_VALUE clear_value {
       .Format = DXGI_FORMAT_R11G11B10_FLOAT,
-      .Color = { 0.0f, 0.2f, 0.4f, 1.0f }
+      .Color  = {clear_color_[0], clear_color_[1], clear_color_[2], clear_color_[3]}
     };
 
     COM_ERROR_IF_FAILED(m_device->CreateCommittedResource(
@@ -1688,6 +1704,7 @@ void D3D12HelloTriangle::RefactorPipeline(DXGI_FORMAT swap_chain_format, DXGI_FO
 
   // Resize depth buffer.
   CreateDepthBuffer();
+  particle_system_.Resize(m_device.Get(), depth_buffer_.Get());
 
   // Reset Dear ImGui.
   ImGui_ImplWin32_Init(Win32Application::GetHwnd());
@@ -1793,32 +1810,35 @@ void D3D12HelloTriangle::PopulateCommandList()
   m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::FRAME_BEGIN);
 
   // Compute pass.
-  particle_system_.Compute(m_commandList.Get(), m_frameIndex);
-
-  // Synchronize the particle pool buffer so the displacement shader reads the updated particles.
-  m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(m_particlePool.Get()));
-
   {
-    ID3D12DescriptorHeap* ppHeaps[] = { m_particleSrvUavHeap.Get() };
-    m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
+    //particle_system_.Compute(m_commandList.Get(), m_frameIndex);
 
-    CD3DX12_GPU_DESCRIPTOR_HANDLE particleHeap(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
-    CD3DX12_GPU_DESCRIPTOR_HANDLE uavHandle(particleHeap, ParticleHeap::PoolUAV, m_particleSrvUavDescriptorSize);
+    // Synchronize the particle pool buffer so the displacement shader reads the updated particles.
+    //m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(m_particlePool.Get()));
 
-    m_commandList->SetPipelineState(m_computePipelineState.Get());
-    m_commandList->SetComputeRootSignature(m_computeRootSignature.Get());
-    m_commandList->SetComputeRoot32BitConstants(0, 2, &m_particleSimConstants, 0);
-    m_commandList->SetComputeRootDescriptorTable(1, uavHandle);
+    //ID3D12DescriptorHeap* ppHeaps[] = { m_particleSrvUavHeap.Get() };
+    //m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
 
-    constexpr UINT threadGroupCountX = (kParticleCount + 255) / 256; // Round up NOT down.
+    //CD3DX12_GPU_DESCRIPTOR_HANDLE particleHeap(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
+    //CD3DX12_GPU_DESCRIPTOR_HANDLE uavHandle(particleHeap, ParticleHeap::PoolUAV, m_particleSrvUavDescriptorSize);
+
+    //m_commandList->SetPipelineState(m_computePipelineState.Get());
+    //m_commandList->SetComputeRootSignature(m_computeRootSignature.Get());
+    //m_commandList->SetComputeRoot32BitConstants(0, 2, &m_particleSimConstants, 0);
+    //m_commandList->SetComputeRootDescriptorTable(1, uavHandle);
+
+    //constexpr UINT threadGroupCountX = (kParticleCount + 255) / 256; // Round up NOT down.
     m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::SIM_BEGIN);
-    m_commandList->Dispatch(threadGroupCountX, 1, 1);
+    //m_commandList->Dispatch(threadGroupCountX, 1, 1);
+    particle_system_.Compute(m_commandList.Get(), m_frameIndex);
     m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::SIM_END);
   }
 
+  ID3D12DescriptorHeap* ppHeaps[] = { m_particleSrvUavHeap.Get() };
+  m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
+
   // Graphics pass.
   {
-    const float clearColor[] = { 0.001f, 0.001f, 0.001f, 1.0f };
 
     // Render to scene texture.
     {
@@ -1832,7 +1852,7 @@ void D3D12HelloTriangle::PopulateCommandList()
       m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(scene_texture_.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET));
 
       // Change Default Heap (m_particlePool) from UNORDERED_ACCESS to SHADER_RESOURCE.
-      m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
+      //m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
 
       // Set scene texture as render target.
       CD3DX12_CPU_DESCRIPTOR_HANDLE sceneTextureRtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), kSceneTextureIndex, m_rtvDescriptorSize);
@@ -1840,7 +1860,7 @@ void D3D12HelloTriangle::PopulateCommandList()
       m_commandList->OMSetRenderTargets(1, &sceneTextureRtvHandle, FALSE, &dsvHandle);
 
       // Render ground plane.
-      m_commandList->ClearRenderTargetView(sceneTextureRtvHandle, clearColor, 0, nullptr);
+      m_commandList->ClearRenderTargetView(sceneTextureRtvHandle, clear_color_, 0, nullptr);
       m_commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 0.f, 0u, 0u, nullptr);
       m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
       m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
@@ -1860,26 +1880,30 @@ void D3D12HelloTriangle::PopulateCommandList()
       m_commandList->OMSetRenderTargets(1, &sceneTextureRtvHandle, FALSE, &dsvHandle);
 
       // Render particles.
-      m_commandList->SetPipelineState(m_particlePipelineState.Get());
-      m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
-      m_commandList->SetGraphicsRootConstantBufferView(0, m_cameraCB[m_frameIndex]->GetGPUVirtualAddress());
-      CD3DX12_GPU_DESCRIPTOR_HANDLE srvHandle(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart(), ParticleHeap::PoolSRV, m_particleSrvUavDescriptorSize);
-      m_commandList->SetGraphicsRootDescriptorTable(1, srvHandle);
-      CD3DX12_GPU_DESCRIPTOR_HANDLE srvDepthHandle(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart(), ParticleHeap::SoftParticle, m_particleSrvUavDescriptorSize);
-      m_commandList->SetGraphicsRootDescriptorTable(2, srvDepthHandle);
+      //m_commandList->SetPipelineState(m_particlePipelineState.Get());
+      //m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+      //m_commandList->SetGraphicsRootConstantBufferView(0, m_cameraCB[m_frameIndex]->GetGPUVirtualAddress());
+      //CD3DX12_GPU_DESCRIPTOR_HANDLE srvHandle(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart(), ParticleHeap::PoolSRV, m_particleSrvUavDescriptorSize);
+      //m_commandList->SetGraphicsRootDescriptorTable(1, srvHandle);
+      //CD3DX12_GPU_DESCRIPTOR_HANDLE srvDepthHandle(m_particleSrvUavHeap->GetGPUDescriptorHandleForHeapStart(), ParticleHeap::SoftParticle, m_particleSrvUavDescriptorSize);
+      //m_commandList->SetGraphicsRootDescriptorTable(2, srvDepthHandle);
       //m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-      m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // DrawIndexedInstanced()
-      m_commandList->IASetIndexBuffer(&m_indexBufferView); // DrawIndexedInstanced()
+      //m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // DrawIndexedInstanced()
+      //m_commandList->IASetIndexBuffer(&m_indexBufferView); // DrawIndexedInstanced()
       m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::RENDER_BEGIN);
       //m_commandList->DrawInstanced(4, kParticleCount, 0, 0);
-      m_commandList->DrawIndexedInstanced(6 * kParticleCount, 1, 0, 0, 0);
+      //m_commandList->DrawIndexedInstanced(6 * kParticleCount, 1, 0, 0, 0);
+      particle_system_.Render(m_commandList.Get(), m_cameraCB[m_frameIndex].Get());
       m_commandList->EndQuery(m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, queryBase + TimestampSlots::RENDER_END);
     
+      ID3D12DescriptorHeap* ppHeaps[] = { m_particleSrvUavHeap.Get() };
+      m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
+
       // Indicate that the depth buffer will be used as a DSV.
       m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(depth_buffer_.Get(), D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE));
 
       // Change Default Heap (m_particlePool) from SHADER_RESOURCE to UNORDERED_ACCESS.
-      m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
+      //m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_particlePool.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
 
       // Indicate that the scene texture will be used as a SRV.
       m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(scene_texture_.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
@@ -2029,7 +2053,7 @@ void D3D12HelloTriangle::PopulateCommandList()
       m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
       // Clear back buffer, technically this is not necessary since blending is turned off.
-      m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+      m_commandList->ClearRenderTargetView(rtvHandle, clear_color_, 0, nullptr);
 
       // Render to the back buffer, using fullscreen triangle.
       m_commandList->DrawInstanced(3, 1, 0, 0);
@@ -2182,7 +2206,7 @@ void D3D12HelloTriangle::CreateDepthBuffer()
   m_device->CreateDepthStencilView(depth_buffer_.Get(), &dsv_description_particles, dsvHandle);
 
   // Create the depth buffer as a SRV for soft particles.
-  D3D12_SHADER_RESOURCE_VIEW_DESC srv_description {
+  /*D3D12_SHADER_RESOURCE_VIEW_DESC srv_description {
     .Format                  = shader_resource_format,
     .ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D,
     .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
@@ -2195,7 +2219,7 @@ void D3D12HelloTriangle::CreateDepthBuffer()
   };
 
   CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(m_particleSrvUavHeap->GetCPUDescriptorHandleForHeapStart(), ParticleHeap::SoftParticle, m_particleSrvUavDescriptorSize);
-  m_device->CreateShaderResourceView(depth_buffer_.Get(), &srv_description, srvHandle);
+  m_device->CreateShaderResourceView(depth_buffer_.Get(), &srv_description, srvHandle);*/
 }
 
 void D3D12HelloTriangle::CreateBloomResource()

@@ -55,6 +55,8 @@ private:
 
   static constexpr UINT kTexturePixelSize = 8; // DXGI_FORMAT_R16G16B16A16_FLOAT = 8 bytes
 
+  static constexpr FLOAT clear_color_[4] = {.001f, .001f, .001f, 1.f};
+
   static constexpr float kMaxDeltaTime = .1f;
 
   static constexpr UINT kZonesPerFrame = 7;   // Zone layout within 1 frame:
@@ -182,11 +184,11 @@ private:
     Count
   };
 
-  ComPtr<ID3D12PipelineState> m_particlePipelineState;
-  ComPtr<ID3D12RootSignature> m_computeRootSignature;
-  ComPtr<ID3D12PipelineState> m_computePipelineState;
-  ComPtr<ID3D12Resource> m_particleUploadBuffer; // Since Default Heap can't directly be written to from the CPU we use a upload heap.
-  ComPtr<ID3D12Resource> m_particlePool; // Pre-allocated structured buffer, to 'remove' dynamic memory allocations in GPU memory.
+  //ComPtr<ID3D12PipelineState> m_particlePipelineState;
+  //ComPtr<ID3D12RootSignature> m_computeRootSignature;
+  //ComPtr<ID3D12PipelineState> m_computePipelineState;
+  //ComPtr<ID3D12Resource> m_particleUploadBuffer; // Since Default Heap can't directly be written to from the CPU we use a upload heap.
+  //ComPtr<ID3D12Resource> m_particlePool; // Pre-allocated structured buffer, to 'remove' dynamic memory allocations in GPU memory.
   ComPtr<ID3D12Resource> m_cameraCB[kFramesInFlight];
   Camera3D m_camera;
 
@@ -224,14 +226,14 @@ private:
   // Check if 16 byte alignment is met.
   static_assert(sizeof(CameraCB) % 16 == 0);
 
-  struct SimulationConstants
+  /*struct SimulationConstants
   {
     float deltaTime{};
     UINT particleCount{};
-  };
+  };*/
 
   HPTimer m_timer;
-  SimulationConstants m_particleSimConstants{.particleCount = kParticleCount};
+  //SimulationConstants m_particleSimConstants{.particleCount = kParticleCount};
 
   ComPtr<ID3D12Resource> m_rawCurlNoiseDataHeap;
   ComPtr<ID3D12Resource> m_curlNoiseTextureHeap;

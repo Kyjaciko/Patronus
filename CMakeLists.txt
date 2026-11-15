@@ -226,23 +226,25 @@ add_custom_command(TARGET D3D12HelloTriangle POST_BUILD
 )
 
 # Shaders live in shaders/ and are compiled to the .cso files
-# D3D12HelloTriangle.cpp reads at startup (GetAssetFullPath resolves to the
-# exe's own directory). See cmake/CompileShaders.cmake for the rule; every
-# stage is SM 6.6 per CLAUDE.md / ADR-0001. The earlier vs_5_1/ps_5_1
-# profiles were a leftover from the vendored sample and would have blocked
-# mesh shaders, ResourceDescriptorHeap and pixel-shader wave intrinsics.
-# Output basenames are the names the .cpp asks for; do not rename here
-# without renaming there.
+# D3D12HelloTriangle.cpp and ParticleSystem.h read at startup
+# (GetAssetFullPath resolves to the exe's own directory). See
+# cmake/CompileShaders.cmake for the rule; every stage is SM 6.6 per
+# CLAUDE.md / ADR-0001. The earlier vs_5_1/ps_5_1 profiles were a leftover
+# from the vendored sample and would have blocked mesh shaders,
+# ResourceDescriptorHeap and pixel-shader wave intrinsics.
+# Output basenames are the names the C++ asks for (the shaders_particle_
+# system_* ones live in ParticleSystem.h); do not rename here without
+# renaming there.
 patronus_add_shader(D3D12HelloTriangle
   SOURCE shaders/shaders.hlsl ENTRY VSMain PROFILE vs_6_6 OUTPUT shaders_VSMain)
 patronus_add_shader(D3D12HelloTriangle
   SOURCE shaders/shaders.hlsl ENTRY PSMain PROFILE ps_6_6 OUTPUT shaders_PSMain)
 patronus_add_shader(D3D12HelloTriangle
-  SOURCE shaders/computeshader.hlsl ENTRY CSMain PROFILE cs_6_6 OUTPUT shaders_CSMain)
+  SOURCE shaders/computeshader.hlsl ENTRY CSMain PROFILE cs_6_6 OUTPUT shaders_particle_system_simulate_CS)
 patronus_add_shader(D3D12HelloTriangle
-  SOURCE shaders/particleshader.hlsl ENTRY VSMain PROFILE vs_6_6 OUTPUT particle_shaders_VSMain)
+  SOURCE shaders/particleshader.hlsl ENTRY VSMain PROFILE vs_6_6 OUTPUT shaders_particle_system_vertex_shader)
 patronus_add_shader(D3D12HelloTriangle
-  SOURCE shaders/particleshader.hlsl ENTRY PSMain PROFILE ps_6_6 OUTPUT particle_shaders_PSMain)
+  SOURCE shaders/particleshader.hlsl ENTRY PSMain PROFILE ps_6_6 OUTPUT shaders_particle_system_pixel_shader)
 patronus_add_shader(D3D12HelloTriangle
   SOURCE shaders/tonemap.hlsl ENTRY VSMain PROFILE vs_6_6 OUTPUT tonemap_shaders_VSMain)
 patronus_add_shader(D3D12HelloTriangle

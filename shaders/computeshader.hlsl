@@ -1,19 +1,27 @@
+static const uint DEAD = 0u;
+static const uint EMIT = 4u; // In bytes (uint = 32 bit = 4 bytes).
+
+//static const float3 gravity = float3(0.f, -9.81f, 0.f);
+static const float3 gravity = float3(0.f, 0.f, 0.f);
+
 struct Particle
 {
   float3 pos;
   float3 vel;
-  float lifetime;
-  float _pad;
+  float  lifetime;
+  float  _pad;
 };
 
-RWStructuredBuffer<Particle> gParticles : register(u0);
-Texture3D<float4> gCurlNoiseTexture : register(t0);
-SamplerState gSampler : register(s0, space0);
+RWStructuredBuffer<Particle> gParticles        : register(u0, space0);
+RWStructuredBuffer<uint>     DeadList          : register(u0, space1);
+RWByteAddressBuffer          Counters          : register(u0, space2);
+//Texture3D<float4>            gCurlNoiseTexture : register(t0);
+//SamplerState                 gSampler          : register(s0, space0);
 
 cbuffer SimulationConstants : register(b0)
 {
   float gDeltaTime;
-  uint gParticleCount;
+  //uint gParticleCount;
 }
 
 // Semi-implicit Euler.
@@ -21,21 +29,28 @@ cbuffer SimulationConstants : register(b0)
 void CSMain(uint3 id : SV_DispatchThreadID)
 {
   uint i = id.x;
-  if (i >= gParticleCount)
+
+  uint count, stride;
+  gParticles.GetDimensions(count, stride);
+  //if (i >= gParticleCount)
+  if (i >= count)
     return;
 
-  //const float3 gravity = float3(0.f, -9.81f, 0.f);
-  const float3 gravity = float3(0.f, 0.f, 0.f);
-
   Particle p = gParticles[i];
-  if (p.lifetime <= 0.f) return;
+  if (p.lifetime <= 0.f)
+    return;
 
-  p.vel += gravity * gDeltaTime;  // v(t) = v0 + a * t.
-  p.pos += p.vel * gDeltaTime;    // x(t) = x0 + v * t.
-
-  if (p.lifetime > 0.f) 
+  p.lifetime = max(0.f, p.lifetime - gDeltaTime);
+  if (p.lifetime > 0.f)
   {
-    p.lifetime = max(0.f, p.lifetime - gDeltaTime);
+    p.vel += gravity * gDeltaTime;  // v(t) = v0 + a * t.
+    p.pos += p.vel   * gDeltaTime;  // x(t) = x0 + v * t.
+  }
+  else
+  {
+    uint index;
+    Counters.InterlockedAdd(DEAD, 1u, index);
+    DeadList[index] = i;
   }
 
   gParticles[i] = p;

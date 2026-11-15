@@ -6,8 +6,8 @@ struct Particle
   float _pad;
 };
 
-StructuredBuffer<Particle> gParticles   : register(t0);
-Texture2D<float>           gDepthBuffer : register(t1);
+StructuredBuffer<Particle> gParticles   : register(t0, space0);
+Texture2D<float>           gDepthBuffer : register(t0, space1);
 
 cbuffer CameraCB : register(b0)
 {
@@ -55,12 +55,12 @@ VSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
   VSOutput output;
 
   // DrawInstanced(4, kParticleCount, 0, 0).
-  //Particle p = gParticles[instanceID];
-  //float2 corner = QuadCorners[vertexID];
+  Particle p = gParticles[instanceID];
+  float2 corner = QuadCorners[vertexID];
 
   // DrawIndexedInstanced(6 * kParticleCount, 1, 0, 0, 0).
-  Particle p = gParticles[vertexID / 4];
-  float2 corner = QuadCorners[vertexID % 4];
+  //Particle p = gParticles[vertexID / 4];
+  //float2 corner = QuadCorners[vertexID % 4];
 
   float3 worldPos = p.pos
                     + gCamRight * corner.x * gBillboardSize
@@ -86,7 +86,7 @@ float LinearizeDepth(float depth)
 
 float4 PSMain(VSOutput input) : SV_TARGET
 {
-  float scene_z    = LinearizeDepth(gDepthBuffer.Load(int3(input.pos.xy, 0)));
+  float scene_z    = LinearizeDepth(gDepthBuffer.Load(int3(input.pos.xy, 0u)));
   float particle_z = input.pos.w;
 
   float distance_to_center           = length(input.corner);

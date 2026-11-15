@@ -6,7 +6,7 @@
 #     SOURCE  shaders/particleshader.hlsl   # relative to the repo root
 #     ENTRY   VSMain
 #     PROFILE vs_6_6                        # any DXC target profile
-#     OUTPUT  particle_shaders_VSMain       # basename; ".cso" is appended
+#     OUTPUT  particle_vs                   # basename; ".cso" is appended
 #     [DEFINES FOO=1 BAR]                   # optional -D flags
 #   )
 #

@@ -7,45 +7,49 @@ namespace patronus::effects
     : system_state_{.duration = 10.f}
     , emitter_state_{.rate_over_time = 100'000.f}
     , emitter_constants_{}
+    , simulate_constants_{}
     , cbv_srv_uav_descriptor_size_{}
     , cbv_srv_uav_heap_{}
+    , particle_pool_{}
     , upload_buffer_{}
     , emitter_constant_buffer_{}
     , counter_{}
     , dead_list_{}
-    //, alive_list_{}
     , cs_root_signature_{}
     , kickoff_cs_pipeline_state_{}
     , emitter_cs_pipeline_state_{}
+    , simulate_cs_pipeline_state_{}
+    , graphics_pipeline_state_{}
   {
-  }
-
-  ParticleSystem::~ParticleSystem()
-  {
-    // Release the COM pointers.
-    cbv_srv_uav_heap_.Reset();
-    upload_buffer_.Reset();
-    for (uint32_t i = 0; i < _countof(emitter_constant_buffer_); ++i) emitter_constant_buffer_[i].Reset();
-    counter_.Reset();
-    dead_list_.Reset();
-    cs_root_signature_.Reset();
-    kickoff_cs_pipeline_state_.Reset();
-    emitter_cs_pipeline_state_.Reset();
   }
 
   _Use_decl_annotations_
-  void ParticleSystem::Init(ID3D12Device* const device, ID3D12GraphicsCommandList* const command_list, ID3D12Resource* const particle_pool)
+  void ParticleSystem::Init(ID3D12Device* const device, ID3D12GraphicsCommandList* const command_list, ID3D12Resource* const depth_buffer)
   {
     CreateConstantBuffers(device);
-    CreateLists(device, command_list, particle_pool);
-    CreateSignature(device);
-    CreatePipelineStates(device);
+    CreateLists(device, command_list);
+    CreateParticleBuffer(device);
+    CreateDepthBufferView(device, depth_buffer);
+    CreateSignatures(device);
+    CreateComputePipelineStates(device);
+  }
+
+  _Use_decl_annotations_
+  void ParticleSystem::Resize(ID3D12Device* const device, ID3D12Resource* const depth_buffer)
+  {
+    CreateDepthBufferView(device, depth_buffer);
+  }
+
+  void ParticleSystem::ReleaseTemporaryBuffers()
+  {
+    upload_buffer_.Reset();
   }
 
   _Use_decl_annotations_
   void ParticleSystem::Update(const float delta_time)
   {
-    system_state_.time += delta_time;
+    simulate_constants_.delta_time =  delta_time;
+    system_state_.time             += delta_time;
 
     uint32_t emit_request{};
     bool     active = system_state_.time >= system_state_.delay &&
@@ -57,7 +61,7 @@ namespace patronus::effects
       emit_request              = static_cast<uint32_t>(system_state_.accumulator);
       system_state_.accumulator -= emit_request;
     }
-    else if (system_state_.looping)
+    else if (system_state_.looping && system_state_.time >= system_state_.delay)
     {
       system_state_.time        = 0.f;
       system_state_.accumulator = 0.f;
@@ -85,33 +89,59 @@ namespace patronus::effects
     command_list->SetDescriptorHeaps(_countof(pp_heaps), pp_heaps);
 
     CD3DX12_GPU_DESCRIPTOR_HANDLE particle_heap(cbv_srv_uav_heap_->GetGPUDescriptorHandleForHeapStart());
-    CD3DX12_GPU_DESCRIPTOR_HANDLE particles_handle(particle_heap, ParticleHeap::kParticles, cbv_srv_uav_descriptor_size_);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE dead_list_handle(particle_heap, ParticleHeap::kDeadList, cbv_srv_uav_descriptor_size_);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE counters_handle(particle_heap,  ParticleHeap::kCounters, cbv_srv_uav_descriptor_size_);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE particles_uav_handle(particle_heap, ParticleHeap::kC_Particles_UAV, cbv_srv_uav_descriptor_size_);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE dead_list_handle(particle_heap,     ParticleHeap::kC_DeadList,      cbv_srv_uav_descriptor_size_);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE counters_handle(particle_heap,      ParticleHeap::kC_Counters,      cbv_srv_uav_descriptor_size_);
 
-    command_list->SetPipelineState(kickoff_cs_pipeline_state_.Get());
     command_list->SetComputeRootSignature(cs_root_signature_.Get());
-    command_list->SetComputeRootConstantBufferView(0, emitter_constant_buffer_[frame_index]->GetGPUVirtualAddress());
-    command_list->SetComputeRootDescriptorTable(1, particles_handle);
-    command_list->SetComputeRootDescriptorTable(2, dead_list_handle);
-    command_list->SetComputeRootDescriptorTable(3, counters_handle);
+    command_list->SetComputeRootConstantBufferView(1, emitter_constant_buffer_[frame_index]->GetGPUVirtualAddress());
+    command_list->SetComputeRootDescriptorTable(2, particles_uav_handle);
+    command_list->SetComputeRootDescriptorTable(3, dead_list_handle);
+    command_list->SetComputeRootDescriptorTable(4, counters_handle);
 
     // Update counter buffer.
+    command_list->SetPipelineState(kickoff_cs_pipeline_state_.Get());
     command_list->Dispatch(1, 1, 1);
 
     // Synchronize the counter buffer so the emitter reads the updated counters.
     command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(counter_.Get()));
 
-    command_list->SetPipelineState(emitter_cs_pipeline_state_.Get());
-    command_list->SetComputeRootSignature(cs_root_signature_.Get());
-    command_list->SetComputeRootConstantBufferView(0, emitter_constant_buffer_[frame_index]->GetGPUVirtualAddress());
-    command_list->SetComputeRootDescriptorTable(1, particles_handle);
-    command_list->SetComputeRootDescriptorTable(2, dead_list_handle);
-    command_list->SetComputeRootDescriptorTable(3, counters_handle);
-
     // Emit the particle(s).
-    constexpr UINT thread_group_count_x = (kMaxParticles + 63) / 64;
-    command_list->Dispatch(thread_group_count_x, 1, 1);
+    constexpr UINT emit_thread_group_count_x = (kMaxParticles + 63) / 64;       // Round up NOT down.
+    command_list->SetPipelineState(emitter_cs_pipeline_state_.Get());
+    command_list->Dispatch(emit_thread_group_count_x, 1, 1);
+
+    // Synchronize the particle pool buffer so the displacement shader reads the updated particles.
+    command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(particle_pool_.Get()));
+
+    // Simulate the particles.
+    constexpr UINT simulate_thread_group_count_x = (kMaxParticles + 255) / 256; //
+    command_list->SetComputeRoot32BitConstants(0, 1, &simulate_constants_, 0);
+    command_list->SetPipelineState(simulate_cs_pipeline_state_.Get());
+    command_list->Dispatch(simulate_thread_group_count_x, 1, 1);
+
+    command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(particle_pool_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
+  }
+
+  _Use_decl_annotations_
+  void ParticleSystem::Render(ID3D12GraphicsCommandList* const command_list, ID3D12Resource* const camera)
+  {
+    ID3D12DescriptorHeap* pp_heaps[] = { cbv_srv_uav_heap_.Get() };
+    command_list->SetDescriptorHeaps(_countof(pp_heaps), pp_heaps);
+
+    CD3DX12_GPU_DESCRIPTOR_HANDLE particle_heap(cbv_srv_uav_heap_->GetGPUDescriptorHandleForHeapStart());
+    CD3DX12_GPU_DESCRIPTOR_HANDLE particles_handle(particle_heap, ParticleHeap::kG_Particles_SRV,             cbv_srv_uav_descriptor_size_);
+    CD3DX12_GPU_DESCRIPTOR_HANDLE depth_handle(particle_heap,     ParticleHeap::kG_SoftParticles_DepthBuffer, cbv_srv_uav_descriptor_size_);
+
+    command_list->SetPipelineState(graphics_pipeline_state_.Get());
+    command_list->SetGraphicsRootSignature(graphics_root_signature_.Get());
+    command_list->SetGraphicsRootConstantBufferView(0, camera->GetGPUVirtualAddress());
+    command_list->SetGraphicsRootDescriptorTable(1, particles_handle);
+    command_list->SetGraphicsRootDescriptorTable(2, depth_handle);
+    command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    command_list->DrawInstanced(4, kMaxParticles, 0, 0);
+
+    command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(particle_pool_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
   }
 
   void ParticleSystem::DrawImGuiWindow()
@@ -149,7 +179,7 @@ namespace patronus::effects
   {
     static constexpr UINT emitter_constants_size = (sizeof(EmitterConstants) + D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT - 1) & ~(D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT - 1);
 
-    for (std::ptrdiff_t i = 0; i < _countof(emitter_constant_buffer_); ++i)
+    for (size_t i = 0; i < _countof(emitter_constant_buffer_); ++i)
     {
       COM_ERROR_IF_FAILED(device->CreateCommittedResource(
           &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
@@ -159,13 +189,13 @@ namespace patronus::effects
           nullptr,
           IID_PPV_ARGS(&emitter_constant_buffer_[i])
         ),
-        L"Failed to create a emitter constant buffer of the particle system."
+        L"Failed to create an emitter constant buffer of the particle system."
       );
     }
   }
 
   _Use_decl_annotations_
-  void ParticleSystem::CreateLists(ID3D12Device* const device, ID3D12GraphicsCommandList* const command_list, ID3D12Resource* const particle_pool)
+  void ParticleSystem::CreateLists(ID3D12Device* const device, ID3D12GraphicsCommandList* const command_list)
   {
     D3D12_DESCRIPTOR_HEAP_DESC cbv_srv_uav_heap_desc {
       .Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
@@ -263,7 +293,7 @@ namespace patronus::effects
       };
 
       CD3DX12_CPU_DESCRIPTOR_HANDLE particle_heap(cbv_srv_uav_heap_->GetCPUDescriptorHandleForHeapStart());
-      CD3DX12_CPU_DESCRIPTOR_HANDLE dead_list_handle(particle_heap, ParticleHeap::kDeadList, cbv_srv_uav_descriptor_size_);
+      CD3DX12_CPU_DESCRIPTOR_HANDLE dead_list_handle(particle_heap, ParticleHeap::kC_DeadList, cbv_srv_uav_descriptor_size_);
       device->CreateUnorderedAccessView(dead_list_.Get(), nullptr, &dead_list_uav_desc, dead_list_handle);
       
       // The counter is a raw buffer to support indirect dispatching.
@@ -279,10 +309,32 @@ namespace patronus::effects
         }
       };
 
-      CD3DX12_CPU_DESCRIPTOR_HANDLE counter_handle(particle_heap, ParticleHeap::kCounters, cbv_srv_uav_descriptor_size_);
+      CD3DX12_CPU_DESCRIPTOR_HANDLE counter_handle(particle_heap, ParticleHeap::kC_Counters, cbv_srv_uav_descriptor_size_);
       device->CreateUnorderedAccessView(counter_.Get(), nullptr, &counter_uav_desc, counter_handle);
+    }
+  }
 
-      // Same as in D3D12HelloTriangle.cpp in the function LoadAssets().
+  _Use_decl_annotations_
+  void ParticleSystem::CreateParticleBuffer(ID3D12Device* const device)
+  {
+    // Create the structured particle buffer.
+    {
+      const UINT particle_buffer_size = sizeof(Particle) * kMaxParticles;
+
+      COM_ERROR_IF_FAILED(device->CreateCommittedResource(
+          &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+          D3D12_HEAP_FLAG_NONE,
+          &CD3DX12_RESOURCE_DESC::Buffer(particle_buffer_size, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
+          D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+          nullptr,
+          IID_PPV_ARGS(&particle_pool_)
+        ), 
+        "Failed to create the structured particle buffer."
+      );
+    }
+
+    // Create the uav and srv view.
+    {
       D3D12_UNORDERED_ACCESS_VIEW_DESC particles_uav_desc {
         .Format        = DXGI_FORMAT_UNKNOWN,
         .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
@@ -295,13 +347,50 @@ namespace patronus::effects
         }
       };
 
-      CD3DX12_CPU_DESCRIPTOR_HANDLE particles_handle(particle_heap, ParticleHeap::kParticles, cbv_srv_uav_descriptor_size_);
-      device->CreateUnorderedAccessView(particle_pool, nullptr, &particles_uav_desc, particles_handle);
+      D3D12_SHADER_RESOURCE_VIEW_DESC particles_srv_desc {
+        .Format                  = DXGI_FORMAT_UNKNOWN,
+        .ViewDimension           = D3D12_SRV_DIMENSION_BUFFER,
+        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        .Buffer = {
+          .FirstElement        = 0,
+          .NumElements         = kMaxParticles,
+          .StructureByteStride = sizeof(Particle),
+          .Flags               = D3D12_BUFFER_SRV_FLAG_NONE
+        }
+      };
+
+      CD3DX12_CPU_DESCRIPTOR_HANDLE particle_heap(cbv_srv_uav_heap_->GetCPUDescriptorHandleForHeapStart());
+      CD3DX12_CPU_DESCRIPTOR_HANDLE uav_handle(particle_heap, ParticleHeap::kC_Particles_UAV, cbv_srv_uav_descriptor_size_);
+      CD3DX12_CPU_DESCRIPTOR_HANDLE srv_handle(particle_heap, ParticleHeap::kG_Particles_SRV, cbv_srv_uav_descriptor_size_);
+      
+      device->CreateUnorderedAccessView(particle_pool_.Get(), nullptr, &particles_uav_desc, uav_handle);
+      device->CreateShaderResourceView(particle_pool_.Get(), &particles_srv_desc, srv_handle);
     }
   }
 
   _Use_decl_annotations_
-  void ParticleSystem::CreateSignature(ID3D12Device* const device)
+  void ParticleSystem::CreateDepthBufferView(ID3D12Device* const device, ID3D12Resource* const depth_buffer)
+  {
+    constexpr DXGI_FORMAT shader_resource_format = DXGI_FORMAT_R32_FLOAT;
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv_description {
+      .Format                  = shader_resource_format,
+      .ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D,
+      .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+      .Texture2D = {
+        .MostDetailedMip     = 0u,
+        .MipLevels           = 1u,
+        .PlaneSlice          = 0u,
+        .ResourceMinLODClamp = 0.f
+      }
+    };
+
+    CD3DX12_CPU_DESCRIPTOR_HANDLE srv_handle(cbv_srv_uav_heap_->GetCPUDescriptorHandleForHeapStart(), ParticleHeap::kG_SoftParticles_DepthBuffer, cbv_srv_uav_descriptor_size_);
+    device->CreateShaderResourceView(depth_buffer, &srv_description, srv_handle);
+  }
+
+  _Use_decl_annotations_
+  void ParticleSystem::CreateSignatures(ID3D12Device* const device)
   {
     D3D12_FEATURE_DATA_ROOT_SIGNATURE feature_data {
       .HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1
@@ -312,6 +401,13 @@ namespace patronus::effects
       feature_data.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
     }
 
+    CreateComputeSignature(device, feature_data);
+    CreateGraphicsSignature(device, feature_data);
+  }
+
+  _Use_decl_annotations_
+  void ParticleSystem::CreateComputeSignature(ID3D12Device* const device, const D3D12_FEATURE_DATA_ROOT_SIGNATURE& feature_data)
+  {
     D3D12_ROOT_SIGNATURE_FLAGS root_signature_flags =
       D3D12_ROOT_SIGNATURE_FLAG_DENY_VERTEX_SHADER_ROOT_ACCESS        |
       D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS          |
@@ -323,26 +419,56 @@ namespace patronus::effects
 
     // Define the particles, dead list and counter, respectively in slot u0: space0, 1 and 2.
     CD3DX12_DESCRIPTOR_RANGE1 uav_ranges[3];
-    uav_ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 0);
-    uav_ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 1);
-    uav_ranges[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 2);
+    uav_ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 0); // Particles.
+    uav_ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 1); // DeadList.
+    uav_ranges[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 2); // Counters.
 
-    CD3DX12_ROOT_PARAMETER1 root_parameters[4];
-    root_parameters[0].InitAsConstantBufferView(0, 0, D3D12_ROOT_DESCRIPTOR_FLAG_NONE, D3D12_SHADER_VISIBILITY_ALL); // slot b0.
-    root_parameters[1].InitAsDescriptorTable(1, &uav_ranges[0], D3D12_SHADER_VISIBILITY_ALL);
-    root_parameters[2].InitAsDescriptorTable(1, &uav_ranges[1], D3D12_SHADER_VISIBILITY_ALL);
-    root_parameters[3].InitAsDescriptorTable(1, &uav_ranges[2], D3D12_SHADER_VISIBILITY_ALL);
+    CD3DX12_ROOT_PARAMETER1 root_parameters[5];
+    root_parameters[0].InitAsConstants(1, 0, 0, D3D12_SHADER_VISIBILITY_ALL);                                        // Simulation constants: slot b0.
+    root_parameters[1].InitAsConstantBufferView(1, 0, D3D12_ROOT_DESCRIPTOR_FLAG_NONE, D3D12_SHADER_VISIBILITY_ALL); // Emitter constants:    slot b1.
+    root_parameters[2].InitAsDescriptorTable(1, &uav_ranges[0], D3D12_SHADER_VISIBILITY_ALL);
+    root_parameters[3].InitAsDescriptorTable(1, &uav_ranges[1], D3D12_SHADER_VISIBILITY_ALL);
+    root_parameters[4].InitAsDescriptorTable(1, &uav_ranges[2], D3D12_SHADER_VISIBILITY_ALL);
 
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC root_signature_desc;
     root_signature_desc.Init_1_1(_countof(root_parameters), root_parameters, 0, nullptr, root_signature_flags);
 
     ComPtr<ID3DBlob> signature{}, error{};
-    COM_ERROR_IF_FAILED(D3DX12SerializeVersionedRootSignature(&root_signature_desc, feature_data.HighestVersion, &signature, &error), "Failed to serialize the root signature of the particle system.");
+    COM_ERROR_IF_FAILED(D3DX12SerializeVersionedRootSignature(&root_signature_desc, feature_data.HighestVersion, &signature, &error), "Failed to serialize the compute root signature of the particle system.");
     COM_ERROR_IF_FAILED(device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&cs_root_signature_)), "Failed to create the compute shader root signature of the particle system.");
   }
 
   _Use_decl_annotations_
-  void ParticleSystem::CreatePipelineState(ID3D12Device* const device, ID3D12PipelineState** pipeline_state, const wchar_t* const compute_shader_path)
+  void ParticleSystem::CreateGraphicsSignature(ID3D12Device* const device, const D3D12_FEATURE_DATA_ROOT_SIGNATURE& feature_data)
+  {
+    D3D12_ROOT_SIGNATURE_FLAGS root_signature_flags =
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS          |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS        |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS      |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_AMPLIFICATION_SHADER_ROOT_ACCESS |
+      D3D12_ROOT_SIGNATURE_FLAG_DENY_MESH_SHADER_ROOT_ACCESS;
+
+    // Define the particle structured buffer and the depth buffer.
+    CD3DX12_DESCRIPTOR_RANGE1 srv_ranges[2];
+    srv_ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0);
+    srv_ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 1);
+
+    CD3DX12_ROOT_PARAMETER1 root_parameters[3];
+    root_parameters[0].InitAsConstantBufferView(0, 0, D3D12_ROOT_DESCRIPTOR_FLAG_NONE, D3D12_SHADER_VISIBILITY_ALL); // slot b0.
+    root_parameters[1].InitAsDescriptorTable(1, &srv_ranges[0], D3D12_SHADER_VISIBILITY_VERTEX);
+    root_parameters[2].InitAsDescriptorTable(1, &srv_ranges[1], D3D12_SHADER_VISIBILITY_PIXEL);
+
+    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC root_signature_desc;
+    root_signature_desc.Init_1_1(_countof(root_parameters), root_parameters, 0, nullptr, root_signature_flags);
+
+    ComPtr<ID3DBlob> signature;
+    ComPtr<ID3DBlob> error;
+    COM_ERROR_IF_FAILED(D3DX12SerializeVersionedRootSignature(&root_signature_desc, feature_data.HighestVersion, &signature, &error), "Failed to serialize the graphics root signature of the particle system.");
+    COM_ERROR_IF_FAILED(device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&graphics_root_signature_)), "Failed to create the graphics root signature of the particle system.");
+  }
+
+  _Use_decl_annotations_
+  void ParticleSystem::CreateComputePipelineState(ID3D12Device* const device, ID3D12PipelineState** pipeline_state, const wchar_t* const compute_shader_path)
   {
     UINT8* shader_data{};
     UINT   shader_data_length{};
@@ -357,15 +483,42 @@ namespace patronus::effects
       .Flags          = D3D12_PIPELINE_STATE_FLAG_NONE
     };
 
-    COM_ERROR_IF_FAILED(device->CreateComputePipelineState(&compute_pso_desc, IID_PPV_ARGS(pipeline_state)), "Failed to create the compute shader of the particle system.");
+    COM_ERROR_IF_FAILED(device->CreateComputePipelineState(&compute_pso_desc, IID_PPV_ARGS(pipeline_state)), "Failed to create a compute shader of the particle system.");
     free(shader_data);
   }
 
   _Use_decl_annotations_
-  void ParticleSystem::CreatePipelineStates(ID3D12Device* const device)
+  void ParticleSystem::CreateComputePipelineStates(ID3D12Device* const device)
   {
-    CreatePipelineState(device, &kickoff_cs_pipeline_state_, kKickoffComputeShaderPath);
-    CreatePipelineState(device, &emitter_cs_pipeline_state_, kEmitterComputeShaderPath);
+    CreateComputePipelineState(device, &kickoff_cs_pipeline_state_,  kKickoffComputeShaderPath);
+    CreateComputePipelineState(device, &emitter_cs_pipeline_state_,  kEmitterComputeShaderPath);
+    CreateComputePipelineState(device, &simulate_cs_pipeline_state_, kSimulateComputeShaderPath);
+  }
+
+  _Use_decl_annotations_
+  void ParticleSystem::CreateGraphicsPipelineState(ID3D12Device* const device, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& standard_graphics_pso, const D3D12_DEPTH_STENCIL_DESC& standard_depth_stencil)
+  {
+    UINT8* vertex_shader_data{};
+    UINT8* pixel_shader_data{};
+    UINT   vertex_shader_data_length{}, pixel_shader_data_length{};
+
+    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(kVertexShaderPath).c_str(), &vertex_shader_data, &vertex_shader_data_length), "Failed to read the vertex shader of the particle system.");
+    COM_ERROR_IF_FAILED(ReadDataFromFile(GetAssetFullPath(kPixelShaderPath).c_str(),  &pixel_shader_data,  &pixel_shader_data_length),  "Failed to read the pixel shader of the particle system.");
+
+    // To make soft particles possible the depth is used as an SRV, so the resource has to be read only.
+    D3D12_DEPTH_STENCIL_DESC depth_state_particles(standard_depth_stencil);
+    depth_state_particles.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC graphics_pso_desc(standard_graphics_pso);
+    graphics_pso_desc.pRootSignature    = graphics_root_signature_.Get();
+    graphics_pso_desc.InputLayout       = { nullptr, 0 };
+    graphics_pso_desc.VS                = CD3DX12_SHADER_BYTECODE(vertex_shader_data, vertex_shader_data_length);
+    graphics_pso_desc.PS                = CD3DX12_SHADER_BYTECODE(pixel_shader_data,  pixel_shader_data_length);
+    graphics_pso_desc.DepthStencilState = depth_state_particles;
+
+    COM_ERROR_IF_FAILED(device->CreateGraphicsPipelineState(&graphics_pso_desc, IID_PPV_ARGS(&graphics_pipeline_state_)), "Failed to create the particle graphics pipeline state.");
+    free(vertex_shader_data);
+    free(pixel_shader_data);
   }
 
 }  // namespace patronus::effects

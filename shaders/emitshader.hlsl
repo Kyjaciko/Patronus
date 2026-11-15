@@ -10,10 +10,15 @@ struct Particle
 };
 
 RWStructuredBuffer<Particle> Particles : register(u0, space0);
-RWStructuredBuffer<uint>     DeadList  : register(u0, space1);
+RWStructuredBuffer<uint>     DeadList  : register(u0, space1); // LIFO.
 RWByteAddressBuffer          Counters  : register(u0, space2);
 
-cbuffer EmitterConstants : register(b0)
+cbuffer SimulationConstants : register(b0)
+{
+  float gDeltaTime;
+}
+
+cbuffer EmitterConstants : register(b1)
 {
   uint emit_request;
   uint seed;
@@ -23,10 +28,13 @@ cbuffer EmitterConstants : register(b0)
 void Kickoff()
 {
   const uint dead_count = Counters.Load(DEAD);
-  const uint emit_count = min(emit_request, dead_count);
+  const uint emit_count = min(emit_request, dead_count); // Dead count limits the particle count to the maximum.
 
-  Counters.Store(EMIT, emit_count);
+  // Update counters:
+  // - How many dead particles left after emitting
+  // - How many particles to emit
   Counters.Store(DEAD, dead_count - emit_count);
+  Counters.Store(EMIT, emit_count);
 }
 
 uint Hash(uint v)
@@ -39,12 +47,13 @@ uint Hash(uint v)
 [numthreads(64,1,1)]
 void Emitter(uint3 id : SV_DispatchThreadID)
 {
-  if (id.x >= Counters.Load(EMIT)) 
+  uint i = id.x;
+  if (i >= Counters.Load(EMIT)) 
     return;
 
-  uint index  = DeadList[Counters.Load(DEAD) + id.x];
+  uint index = DeadList[Counters.Load(DEAD) + i];
 
-  uint  random_seed = Hash(id.x + seed);
+  uint  random_seed = Hash(i + seed);
   float direction_x = (seed % 2u < 1u) ? 1.f : -1.f;
   float direction_y = (seed % 4u < 2u) ? 1.f : -1.f;
   float direction_z = (seed % 8u < 4u) ? 1.f : -1.f;
