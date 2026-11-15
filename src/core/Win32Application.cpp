@@ -158,12 +158,23 @@ LRESULT CALLBACK Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wP
     return 0;
 
   case WM_PAINT:
-    if (pSample)
+  {
+    // TODO: Fix this quick fix!
+    //
+    // OnUpdate and OnRender should be in an else-statement in the message loop.
+    // Problem with this approach is if the window is dragged or resized continously
+    // DefWindowProc() starts its own message loop and our update and render aren't called.
+    // Comment in WM_SIZE notes this too.
+    static bool still_rendering = false;
+    if (pSample && !still_rendering)
     {
+      still_rendering = true;
       pSample->OnUpdate();
       pSample->OnRender();
+      still_rendering = false;
     }
     return 0;
+  }
 
     ///////////////////////
     // Keyboard messages //
