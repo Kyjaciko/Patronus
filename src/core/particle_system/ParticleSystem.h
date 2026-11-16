@@ -62,8 +62,11 @@ namespace patronus::effects
       kC_Counters,
       kG_Particles_SRV,
       kG_SoftParticles_DepthBuffer,
-      //kAliveList_A,
-      //kAliveList_B,
+      kCG_AliveList_A_UAV,
+      kCG_AliveList_A_SRV,
+      kCG_AliveList_B_UAV,
+      kCG_AliveList_B_SRV,
+      kCG_Arguments,
       kCount
     };
 
@@ -71,8 +74,8 @@ namespace patronus::effects
     {
       kDead = 0,
       kEmit,
-      //kAliveIn,
-      //kAliveOut,
+      kAliveIn,
+      kAliveOut,
       kCount
     };
 
@@ -100,15 +103,24 @@ namespace patronus::effects
     SimulateConstants   simulate_constants_;
 
     // Rendering resources (TODO: ParticleSystem shouldn't handle this)
-    UINT                         cbv_srv_uav_descriptor_size_;
-    ComPtr<ID3D12DescriptorHeap> cbv_srv_uav_heap_;
+    UINT                           cbv_srv_uav_descriptor_size_;
+    ComPtr<ID3D12DescriptorHeap>   cbv_srv_uav_heap_;
 
-    ComPtr<ID3D12Resource>       upload_buffer_;
-    ComPtr<ID3D12Resource>       emitter_constant_buffer_[kFramesInFlight];
-    ComPtr<ID3D12Resource>       counter_;                     // Holds how much particles are dead, emitted or alive.
-    ComPtr<ID3D12Resource>       dead_list_;                   // Holds the index of dead particles, type is uint.
-    //ComPtr<ID3D12Resource>       alive_list_[2];             // Holds the index of alive particles, type is uint.
-    ComPtr<ID3D12Resource>       particle_pool_;               // Holds the particles their locations.
+    uint8_t                        alive_list_order_;
+    static constexpr uint32_t      alive_lists_heap_slots_[][2] = { 
+      { ParticleHeap::kCG_AliveList_A_UAV, ParticleHeap::kCG_AliveList_A_SRV },
+      { ParticleHeap::kCG_AliveList_B_UAV, ParticleHeap::kCG_AliveList_B_SRV }
+    };
+
+    ComPtr<ID3D12Resource>         upload_buffer_;
+    ComPtr<ID3D12Resource>         emitter_constant_buffer_[kFramesInFlight];
+    ComPtr<ID3D12Resource>         arguments_;                   // Holds the indirect arguments of the emit and simulate shaders and the instance count of the vertex shader.
+    ComPtr<ID3D12Resource>         counter_;                     // Holds how much particles are dead, emitted or alive.
+    ComPtr<ID3D12Resource>         dead_list_;                   // Holds the index of dead particles,  type is uint.
+    ComPtr<ID3D12Resource>         alive_list_[2];               // Holds the index of alive particles, type is uint.
+                                                                 // - IN:  all particles simulate processes.
+                                                                 // - OUT: all particles alive after simulate.
+    ComPtr<ID3D12Resource>         particle_pool_;               // Holds the particles their locations.
 
     ComPtr<ID3D12RootSignature>    cs_root_signature_;
     ComPtr<ID3D12RootSignature>    graphics_root_signature_;
@@ -116,15 +128,18 @@ namespace patronus::effects
     ComPtr<ID3D12PipelineState>    emitter_cs_pipeline_state_;
     ComPtr<ID3D12PipelineState>    simulate_cs_pipeline_state_;
     ComPtr<ID3D12PipelineState>    graphics_pipeline_state_;
-    //ComPtr<ID3D12CommandSignature> cs_command_signature_;
+    ComPtr<ID3D12CommandSignature> cs_command_signature_;
+    //ComPtr<ID3D12CommandSignature>  graphics_command_signature_;
 
     void CreateConstantBuffers(_In_ ID3D12Device* const device);
     void CreateLists(_In_ ID3D12Device* const device, _In_ ID3D12GraphicsCommandList* const command_list);
     void CreateParticleBuffer(_In_ ID3D12Device* const device);
     void CreateDepthBufferView(_In_ ID3D12Device* const device, _In_ ID3D12Resource* const depth_buffer);
+    void CreateArgumentsBuffer(_In_ ID3D12Device* const device);
     void CreateSignatures(_In_ ID3D12Device* const device);
     void CreateComputeSignature(_In_ ID3D12Device* const device, _In_ const D3D12_FEATURE_DATA_ROOT_SIGNATURE& feature_data);
     void CreateGraphicsSignature(_In_ ID3D12Device* const device, _In_ const D3D12_FEATURE_DATA_ROOT_SIGNATURE& feature_data);
+    void CreateCommandSignature(_In_ ID3D12Device* const device);
     void CreateComputePipelineState(_In_ ID3D12Device* const device, _Out_ ID3D12PipelineState** pipeline_state, _In_ const wchar_t* const compute_shader_path);
     void CreateComputePipelineStates(_In_ ID3D12Device* const device);
 

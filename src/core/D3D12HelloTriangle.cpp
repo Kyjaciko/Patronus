@@ -1297,7 +1297,7 @@ void D3D12HelloTriangle::LoadAssets()
     };
     
     if (!m_timestampWriter.IsOpen())
-      m_timestampWriter.Open("benchmarks/runs/gpu_timestamps_bloom.csv", metadata);
+      m_timestampWriter.Open("benchmarks/runs/gpu_timestamps_bloom_and_execute_indirect.csv", metadata);
   }
 
   // Release the raw curl noise data, since it's now on the GPU (in the default heap).
