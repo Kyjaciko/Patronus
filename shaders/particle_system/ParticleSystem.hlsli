@@ -7,13 +7,16 @@ static const uint ALIVE_IN  = 8u;
 static const uint ALIVE_OUT = 12u;
 
 // Arguments
-static const uint X_EMIT        = 0u;
-static const uint Y_EMIT        = 4u;
-static const uint Z_EMIT        = 8u;
-static const uint X_SIM         = 12u;
-static const uint Y_SIM         = 16u;
-static const uint Z_SIM         = 20u;
-static const uint InstanceCount = 24u;
+static const uint X_EMIT                 = 0u;
+static const uint Y_EMIT                 = 4u;
+static const uint Z_EMIT                 = 8u;
+static const uint X_SIM                  = 12u;
+static const uint Y_SIM                  = 16u;
+static const uint Z_SIM                  = 20u;
+static const uint VertexCountPerInstance = 24u;
+static const uint InstanceCount          = 28u;
+static const uint StartVertexLocation    = 32u;
+static const uint StartInstanceLocation  = 36u;
 
 struct Particle
 {

@@ -79,6 +79,21 @@ namespace patronus::effects
       kCount
     };
 
+    enum class IndirectArguments : uint32_t
+    {
+      kX_EMIT = 0,
+      kY_EMIT,
+      kZ_EMIT,
+      kX_SIM,
+      kY_SIM,
+      kZ_SIM,
+      kVertexCountPerInstance,
+      kInstanceCount,
+      kStartVertexLocation,
+      kStartInstanceLocation,
+      kCount,
+    };
+
   public:
     ParticleSystem();
 
@@ -129,7 +144,7 @@ namespace patronus::effects
     ComPtr<ID3D12PipelineState>    simulate_cs_pipeline_state_;
     ComPtr<ID3D12PipelineState>    graphics_pipeline_state_;
     ComPtr<ID3D12CommandSignature> cs_command_signature_;
-    //ComPtr<ID3D12CommandSignature>  graphics_command_signature_;
+    ComPtr<ID3D12CommandSignature> graphics_command_signature_;
 
     void CreateConstantBuffers(_In_ ID3D12Device* const device);
     void CreateLists(_In_ ID3D12Device* const device, _In_ ID3D12GraphicsCommandList* const command_list);
@@ -139,7 +154,8 @@ namespace patronus::effects
     void CreateSignatures(_In_ ID3D12Device* const device);
     void CreateComputeSignature(_In_ ID3D12Device* const device, _In_ const D3D12_FEATURE_DATA_ROOT_SIGNATURE& feature_data);
     void CreateGraphicsSignature(_In_ ID3D12Device* const device, _In_ const D3D12_FEATURE_DATA_ROOT_SIGNATURE& feature_data);
-    void CreateCommandSignature(_In_ ID3D12Device* const device);
+    void CreateComputeCommandSignatures(_In_ ID3D12Device* const device);
+    void CreateGraphicsCommandSignatures(_In_ ID3D12Device* const device);
     void CreateComputePipelineState(_In_ ID3D12Device* const device, _Out_ ID3D12PipelineState** pipeline_state, _In_ const wchar_t* const compute_shader_path);
     void CreateComputePipelineStates(_In_ ID3D12Device* const device);
 

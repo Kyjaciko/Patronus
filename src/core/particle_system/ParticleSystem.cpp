@@ -133,7 +133,7 @@ namespace patronus::effects
     command_list->SetComputeRootDescriptorTable(5, alive_list_write_surviving_particles);
     command_list->SetComputeRootDescriptorTable(6, alive_list_read_emitted_particles);
     command_list->SetPipelineState(simulate_cs_pipeline_state_.Get());
-    command_list->ExecuteIndirect(cs_command_signature_.Get(), 1u, arguments_.Get(), 3u * sizeof(uint32_t), nullptr, 0u);
+    command_list->ExecuteIndirect(cs_command_signature_.Get(), 1u, arguments_.Get(), static_cast<UINT>(IndirectArguments::kX_SIM) * sizeof(uint32_t), nullptr, 0u);
     
     command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(alive_list_[(alive_list_order_ + 1) & 0x01].Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
   }
@@ -141,10 +141,18 @@ namespace patronus::effects
   _Use_decl_annotations_
   void ParticleSystem::Render(ID3D12GraphicsCommandList* const command_list, ID3D12Resource* const camera)
   {
-    command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(counter_.Get()));
     command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(particle_pool_.Get(),                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
     command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(alive_list_[alive_list_order_].Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
   
+    // Copy the ALIVE_OUT count from the counters buffer to the arguments buffer InstanceCount.
+    command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(counter_.Get(),   D3D12_RESOURCE_STATE_UNORDERED_ACCESS,  D3D12_RESOURCE_STATE_COPY_SOURCE));
+    command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(arguments_.Get(), D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_COPY_DEST));
+    command_list->CopyBufferRegion(arguments_.Get(), static_cast<UINT>(IndirectArguments::kInstanceCount) * sizeof(uint32_t), 
+                                   counter_.Get(),   static_cast<UINT>(CounterBuffer::kAliveOut)          * sizeof(uint32_t),
+                                   sizeof(uint32_t));
+    command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(counter_.Get(),   D3D12_RESOURCE_STATE_COPY_SOURCE,       D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
+    command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(arguments_.Get(), D3D12_RESOURCE_STATE_COPY_DEST,         D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT));
+    
     ID3D12DescriptorHeap* pp_heaps[] = { cbv_srv_uav_heap_.Get() };
     command_list->SetDescriptorHeaps(_countof(pp_heaps), pp_heaps);
 
@@ -162,7 +170,7 @@ namespace patronus::effects
     command_list->SetGraphicsRootDescriptorTable(3, alive_list_handle);
     command_list->SetGraphicsRootDescriptorTable(4, counters_handle);
     command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-    command_list->DrawInstanced(4, kMaxParticles, 0, 0);
+    command_list->ExecuteIndirect(graphics_command_signature_.Get(), 1u, arguments_.Get(), static_cast<UINT>(IndirectArguments::kVertexCountPerInstance) * sizeof(uint32_t), nullptr, 0u);
 
     // Indicate that the arguments buffer will be used as indirect arguments.
     command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(arguments_.Get(),                      D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,         D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
@@ -456,7 +464,7 @@ namespace patronus::effects
   void ParticleSystem::CreateArgumentsBuffer(ID3D12Device* const device)
   {
     // Create the raw arguments buffer.
-    constexpr UINT arguments_count = 7u; // 7 -> [X_Emit, Y_Emit, Z_Emit, X_Sim, Y_Sim, Z_Sim, InstanceCount].
+    constexpr UINT arguments_count = static_cast<UINT>(IndirectArguments::kCount);
     {
       const UINT arguments_buffer_size = sizeof(uint32_t) * arguments_count;
 
@@ -506,7 +514,8 @@ namespace patronus::effects
 
     CreateComputeSignature(device, feature_data);
     CreateGraphicsSignature(device, feature_data);
-    CreateCommandSignature(device);
+    CreateComputeCommandSignatures(device);
+    CreateGraphicsCommandSignatures(device);
   }
 
   _Use_decl_annotations_
@@ -586,7 +595,7 @@ namespace patronus::effects
   }
 
   _Use_decl_annotations_
-  void ParticleSystem::CreateCommandSignature(ID3D12Device* const device)
+  void ParticleSystem::CreateComputeCommandSignatures(ID3D12Device* const device)
   {
     D3D12_INDIRECT_ARGUMENT_DESC dispatch_desc {
       .Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH
@@ -604,6 +613,27 @@ namespace patronus::effects
     };
     
     COM_ERROR_IF_FAILED(device->CreateCommandSignature(&command_desc, nullptr, IID_PPV_ARGS(&cs_command_signature_)), "Failed to create the compute command signature of the particle system.");
+  }
+
+  _Use_decl_annotations_
+  void ParticleSystem::CreateGraphicsCommandSignatures(ID3D12Device* const device)
+  {
+    D3D12_INDIRECT_ARGUMENT_DESC draw_desc {
+      .Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW
+    };
+
+    D3D12_INDIRECT_ARGUMENT_DESC arguments[] = {
+      draw_desc
+    };
+
+    D3D12_COMMAND_SIGNATURE_DESC command_desc {
+      .ByteStride       = sizeof(D3D12_DRAW_ARGUMENTS),
+      .NumArgumentDescs = _countof(arguments),
+      .pArgumentDescs   = arguments,
+      .NodeMask         = 0u
+    };
+    
+    COM_ERROR_IF_FAILED(device->CreateCommandSignature(&command_desc, nullptr, IID_PPV_ARGS(&graphics_command_signature_)), "Failed to create the graphics command signature of the particle system.");
   }
 
   _Use_decl_annotations_

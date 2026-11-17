@@ -240,12 +240,6 @@ patronus_add_shader(D3D12HelloTriangle
 patronus_add_shader(D3D12HelloTriangle
   SOURCE shaders/shaders.hlsl ENTRY PSMain PROFILE ps_6_6 OUTPUT shaders_PSMain)
 patronus_add_shader(D3D12HelloTriangle
-  SOURCE shaders/computeshader.hlsl ENTRY CSMain PROFILE cs_6_6 OUTPUT shaders_particle_system_simulate_CS)
-patronus_add_shader(D3D12HelloTriangle
-  SOURCE shaders/particleshader.hlsl ENTRY VSMain PROFILE vs_6_6 OUTPUT shaders_particle_system_vertex_shader)
-patronus_add_shader(D3D12HelloTriangle
-  SOURCE shaders/particleshader.hlsl ENTRY PSMain PROFILE ps_6_6 OUTPUT shaders_particle_system_pixel_shader)
-patronus_add_shader(D3D12HelloTriangle
   SOURCE shaders/tonemap.hlsl ENTRY VSMain PROFILE vs_6_6 OUTPUT tonemap_shaders_VSMain)
 patronus_add_shader(D3D12HelloTriangle
   SOURCE shaders/tonemap.hlsl ENTRY PSMain PROFILE ps_6_6 OUTPUT tonemap_shaders_PSMain)
@@ -253,10 +247,29 @@ patronus_add_shader(D3D12HelloTriangle
   SOURCE shaders/bloomshader.hlsl ENTRY DownSample PROFILE cs_6_6 OUTPUT shaders_bloom_downsample_CSMain)
 patronus_add_shader(D3D12HelloTriangle
   SOURCE shaders/bloomshader.hlsl ENTRY UpSample PROFILE cs_6_6 OUTPUT shaders_bloom_upsample_CSMain)
+# Each list is the full transitive #include chain of that group: DEPENDS
+# only sees the files named here, not what they include in turn.
+set(_particle_compute_includes
+  shaders/particle_system/ParticleSystem.hlsli
+  shaders/particle_system/Compute.hlsli)
+set(_particle_graphics_includes
+  shaders/particle_system/ParticleSystem.hlsli
+  shaders/particle_system/Graphics.hlsli)
 patronus_add_shader(D3D12HelloTriangle
-  SOURCE shaders/emitshader.hlsl ENTRY Kickoff PROFILE cs_6_6 OUTPUT shaders_particle_system_kickoff_CS)
+  SOURCE shaders/particle_system/Emitter.hlsl ENTRY Kickoff PROFILE cs_6_6 OUTPUT shaders_particle_system_kickoff_CS
+  DEPENDS ${_particle_compute_includes})
 patronus_add_shader(D3D12HelloTriangle
-  SOURCE shaders/emitshader.hlsl ENTRY Emitter PROFILE cs_6_6 OUTPUT shaders_particle_system_emitter_CS)
+  SOURCE shaders/particle_system/Emitter.hlsl ENTRY Emitter PROFILE cs_6_6 OUTPUT shaders_particle_system_emitter_CS
+  DEPENDS ${_particle_compute_includes})
+patronus_add_shader(D3D12HelloTriangle
+  SOURCE shaders/particle_system/Simulate.hlsl ENTRY Simulate PROFILE cs_6_6 OUTPUT shaders_particle_system_simulate_CS
+  DEPENDS ${_particle_compute_includes})
+patronus_add_shader(D3D12HelloTriangle
+  SOURCE shaders/particle_system/Graphics.hlsl ENTRY VSMain PROFILE vs_6_6 OUTPUT shaders_particle_system_vertex_shader
+  DEPENDS ${_particle_graphics_includes})
+patronus_add_shader(D3D12HelloTriangle
+  SOURCE shaders/particle_system/Graphics.hlsl ENTRY PSMain PROFILE ps_6_6 OUTPUT shaders_particle_system_pixel_shader
+  DEPENDS ${_particle_graphics_includes})
 
 # Baked assets (assets/) are copied next to the exe as assets/ so the app
 # can load them via GetAssetFullPath(L"assets/...") regardless of the

@@ -26,7 +26,7 @@ void Kickoff()
   Counters.Store(ALIVE_IN,  alive_count + emit_count);
   Counters.Store(ALIVE_OUT, 0u);
 
-  // Update argument
+  // Update arguments buffer (except for InstanceCount)
   const uint emit_group_count = (emit_count + 63u) / 64u;
   Arguments.Store(X_EMIT, emit_group_count);
   Arguments.Store(Y_EMIT, 1u);
@@ -36,6 +36,10 @@ void Kickoff()
   Arguments.Store(X_SIM,  sim_group_count);
   Arguments.Store(Y_SIM,  1u);
   Arguments.Store(Z_SIM,  1u);
+
+  Arguments.Store(VertexCountPerInstance,  4u);
+  Arguments.Store(StartVertexLocation,     0u);
+  Arguments.Store(StartInstanceLocation,   0u);
 }
 
 [numthreads(64,1,1)]
