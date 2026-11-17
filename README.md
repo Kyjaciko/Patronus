@@ -20,7 +20,11 @@ frame synchronisation, tearing-aware fullscreen) is stable — see
 [ADR-0002](docs/adr/0002-frames-in-flight.md) — and the current feature
 focus is the GPU particle system shown above: a compute shader simulation,
 curl-noise advection, and a vertex-pulled/billboarded renderer, driven by
-a perspective camera with mouse-look controls.
+a perspective camera with mouse-look controls. The curl field and the
+attracting band are temporarily out of the simulate kernel since the M2
+rewrite ([ADR-0005](docs/adr/0005-gpu-driven-particle-lists.md)), so the
+demo currently shows particles flying out of the emitter in straight
+lines instead of the orb above.
 
 All of that feature work currently lives under `src/core/`, which started
 as Microsoft's `D3D12HelloTriangle` sample (vendored in for learning, see
