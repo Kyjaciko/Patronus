@@ -74,6 +74,12 @@ next milestones. The near-term plan is in [`docs/roadmap.md`](docs/roadmap.md).
 - Vertex pulling: billboarded particle quads are built entirely in the
   vertex shader from `SV_InstanceID`/`SV_VertexID`, with no vertex or
   index buffer bound at all.
+- GPU-driven particle lifetime: a dead list, two alive lists swapped by
+  rebinding, and counters that never leave the GPU. A one-thread kickoff
+  kernel writes the dispatch arguments; emit, simulate and the draw all
+  run through `ExecuteIndirect`, so only live particles are simulated and
+  drawn. See [ADR-0005](docs/adr/0005-gpu-driven-particle-lists.md) and
+  [devlog: M2 lists](docs/devlog/2026-11-17-m2-gpu-driven-lists.md).
 - Semi-implicit (symplectic) Euler integration.
 - 3D curl-noise velocity field, baked offline and sampled per-particle in
   the compute shader, plus a spherical attracting-band force and velocity
@@ -193,8 +199,9 @@ The build produces two executables:
 ## Benchmarks
 
 The renderer times its GPU zones per frame with D3D12 timestamp queries:
-`frame` (the whole command list), `sim` (the compute dispatch), `render`
-(the particle draw) and `bloom` (split into `bloom down 0`,
+`frame` (the whole command list), `sim` (the kickoff, emit and simulate
+dispatches), `render` (the particle draw, including the copy of the live
+count) and `bloom` (split into `bloom down 0`,
 `bloom down rest` and `bloom up`). Results are resolved into a readback buffer
 and picked up two frames later, after a fence wait the frame loop performs
 anyway, so measuring adds no CPU/GPU synchronisation — see
@@ -258,6 +265,39 @@ on a 60-CU GPU) cost a near-constant 1.5 to 2.5 µs per dispatch, so they
 are bound by dispatch and barrier overhead, not bandwidth. See
 [ADR-0013](docs/adr/0013-bloom-mip-chain.md) for the analysis and the
 follow-up prediction at 1440p.
+
+### M2 indirect draw against `DrawInstanced(4, N)`
+
+1M-particle pool, 1280x720, **Debug**, fixed camera, AMD Radeon RX 7800 XT,
+10 000 particles/s, so at most 10% of the pool is alive. The two builds
+differ only in the draw, so `sim` and `bloom` are control zones. p50 / p95
+in µs over the whole run:
+
+| zone | `DrawInstanced(4, N)` | `ExecuteIndirect` | delta p50 |
+|---|---:|---:|---:|
+| render (under test) | 325 / 346 | 68 / 101 | -79% |
+| sim (control) | 25 / 38 | 26 / 38 | +1% |
+| bloom (control) | 45 / 48 | 45 / 49 | 0% |
+| frame | 462 / 551 | 202 / 246 | -56% |
+
+![render and sim against frame: DrawInstanced against ExecuteIndirect at 10 000/s, and ExecuteIndirect over a full lifecycle at 100 000/s](docs/media/bench_m2_indirect_draw.png)
+
+*Left: both builds while the pool fills at 10 000/s. Right: the indirect
+build at 100 000/s, from an empty pool to a full one and back to empty.*
+
+With nothing alive, the indirect draw costs 6.5 µs. `DrawInstanced(4, N)`
+costs about 285 µs, because it still runs four vertex-shader invocations
+for every slot in the pool. At 100 000 particles/s the advantage shrinks
+as the pool fills, from 244 µs to about zero:
+
+![render and sim at 100 000/s: DrawInstanced against ExecuteIndirect while the pool fills](docs/media/bench_m2_indirect_draw_100k.png)
+
+At a full pool both draw the same instances. The prediction there is that
+`ExecuteIndirect` is at most 6.5 µs slower, and ahead as soon as more than
+about 2.5% of the pool is dead. Two separate runs cannot resolve a
+difference that small, so that run, alternating both draws in one
+process, is still to do. See
+[devlog: M2 lists](docs/devlog/2026-11-17-m2-gpu-driven-lists.md).
 
 ## Documentation
 

@@ -144,6 +144,40 @@ Open:
   ([devlog](devlog/2026-11-10-m1-bloom.md)); the fill-rate curve and
   overdraw are still to come.
 
+### M2 checklist (hand-written side)
+
+Done, 2026-11-12 to 2026-11-17 — see
+[devlog: M2 lists](devlog/2026-11-17-m2-gpu-driven-lists.md) and
+[ADR-0005](adr/0005-gpu-driven-particle-lists.md), "Implementation status":
+
+- [x] Dead list and emit: the list starts as `0..N-1`, and a one-thread
+  kickoff computes `emit = min(request, DEAD)`. The emit kernel pops from
+  the top.
+- [x] Death and recycling: simulate pushes an index back on the frame its
+  particle dies, and only then.
+- [x] Alive lists A/B, swapped by rebinding. Emit and simulate run through
+  `ExecuteIndirect`, with arguments written by the kickoff.
+- [x] Indirect draw: `ALIVE_OUT` is copied into `InstanceCount`. Measured
+  against `DrawInstanced(4, N)` with an early-out: `render` −79% at p50
+  with at most 10% of the pool alive, with both controls flat. At
+  100 000/s the gap closes from 244 µs to about zero as the pool fills.
+  With the pool empty the zone costs 6.5 µs (Debug).
+
+Open:
+
+- [ ] Full-pool A/B, with both draws alternating in one process.
+  Prediction: `ExecuteIndirect` is at most 6.5 µs slower at 1M alive and
+  ahead once more than about 2.5% of the pool is dead. Separate runs
+  cannot resolve this: near a full pool they give −51 to +26 µs,
+  depending on how they are lined up.
+- [ ] Log the alive count per frame, so that `render` can be plotted
+  against the count instead of the frame index.
+- [ ] Rerun the 10 000/s pair in Release for the README.
+- [ ] Wave-aggregated counters, measured against one atomic per particle.
+  This also tests the unexplained `sim` jump at the first deaths (devlog).
+- [ ] Emitter parameters and several emitters
+  ([ADR-0010](adr/0010-data-driven-emitters.md)).
+
 ### Tooling already in place
 
 - `tools/bake_curl_noise.py`: tileable curl volume, scalar noise in alpha,

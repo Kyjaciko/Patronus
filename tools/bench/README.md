@@ -8,7 +8,8 @@ The writer is `patronus::profiling::FrameTimingLog` (`src/profiling/`);
 the D3D12 timestamp queries that feed it, and the two-frame-late readback
 that keeps measurement free of synchronisation, are described in
 ADR-0011. Zones emitted today: `frame` (whole command list), `sim`
-(compute dispatch), `render` (particle draw), and `bloom` with its parts
+(kickoff, emit and simulate dispatches), `render` (particle draw,
+including the copy of the live count and its barriers), and `bloom` with its parts
 `bloom down 0`, `bloom down rest` and `bloom up` (ADR-0013). The bloom zones
 are written with zero length when bloom is off, so a bloom-off run can be
 compared against a bloom-on run zone by zone.
@@ -91,7 +92,17 @@ not a measurement of anything.
   "rerun", not "ship the number".
 - **Interleave A and B in one process** when the effect you are chasing is
   small. Separate runs pick up separate thermal and clock states, and that
-  difference is easily larger than the thing being measured.
+  difference is easily larger than the thing being measured. For scale:
+  two Debug runs of the same build over the same scenario differed by up
+  to 6 µs in `render` per 200-frame window (M2).
+- **Fill in `note=` for every run, and check the file against the data.**
+  All four M2 draw-path runs carried an old note, and one of them was
+  captured with the other build than its file name says (it has since
+  been recaptured). The data gave it
+  away: its `render` zone dropped to 6.5 µs with the pool empty, and
+  `DrawInstanced(4, N)` cannot go below about 285 µs. Before comparing two
+  variants, find a number that only one of them can produce. See
+  `docs/devlog/2026-11-17-m2-gpu-driven-lists.md`.
 - Report p50 and p95, not the mean. Spikes matter for frame pacing and the
   mean hides them.
 - Record `gpu=`, `config=`, `resolution=`, `particles=` every time. A
