@@ -120,7 +120,9 @@ namespace patronus::effects
     command_list->SetPipelineState(emitter_cs_pipeline_state_.Get());
     command_list->ExecuteIndirect(cs_command_signature_.Get(), 1u, arguments_.Get(), 0u, nullptr, 0u);
 
-    // Synchronize the particle pool buffer so the displacement shader reads the updated particles.
+    // Synchronize the buffers so the displacement shader reads the updated states.
+    command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(counter_.Get()));
+    command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(dead_list_.Get()));
     command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(particle_pool_.Get()));
 
     // Simulate the particles.
