@@ -41,7 +41,7 @@ void D3D12HelloTriangle::OnInit()
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-  io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // Allow Dear ImGui to be outside our window.
+  //io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // Allow Dear ImGui to be outside our window.
 
   ImGui::StyleColorsDark();
   ImGuiStyle& style = ImGui::GetStyle();

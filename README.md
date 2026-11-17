@@ -7,11 +7,11 @@ built on top of it, a GPU compute-driven particle system with 3D curl-noise
 advection and vertex-pulled billboard rendering. Windows, MSVC, C++20,
 HLSL Shader Model 6.6.
 
-![3D curl noise with attracting center force](docs/media/3D_curl_noise_with_attracting_center_force_orb_effect.gif)
+https://github.com/user-attachments/assets/e1120d04-9fe5-4399-ac3b-a2b07f1fcbd6
 
-*3D curl-noise velocity field sampled per-particle in a compute shader,
-plus a spherical attracting force pulling particles into an orbiting
-shell — see [ADR-driven devlog: curl noise & mouse-look](docs/devlog/2026-09-15-curl-noise-and-mouse-look.md).*
+*Current state: one emitter on the GPU-driven dead and alive lists, drawn
+with `ExecuteIndirect`, with bloom on top — see
+[devlog: M2 GPU-driven lists](docs/devlog/2026-11-17-m2-gpu-driven-lists.md).*
 
 ## Status
 
@@ -24,7 +24,7 @@ a perspective camera with mouse-look controls. The curl field and the
 attracting band are temporarily out of the simulate kernel since the M2
 rewrite ([ADR-0005](docs/adr/0005-gpu-driven-particle-lists.md)), so the
 demo currently shows particles flying out of the emitter in straight
-lines instead of the orb above.
+lines instead of the curl-noise orb in the [timeline](#timeline).
 
 All of that feature work currently lives under `src/core/`, which started
 as Microsoft's `D3D12HelloTriangle` sample (vendored in for learning, see
@@ -157,14 +157,18 @@ dust dragged in, then a flash and two line-drawn impact rings. Same tool,
 *3D curl-noise advection with no attracting force — particles scatter
 freely along the divergence-free field.*
 
-| Bloom off | Bloom on |
-| :---: | :---: |
-| ![Scene without bloom](docs/media/bloom_off.png) | ![Scene with bloom](docs/media/bloom_on.png) |
+![3D curl noise with attracting center force](docs/media/3D_curl_noise_with_attracting_center_force_orb_effect.gif)
 
-*M1 bloom, same camera. Only HDR values above the soft-knee threshold
-feed the mip chain, so the beams and the particle core glow onto the
-dark room while the room itself adds nothing. 25 µs at 720p on an
-RX 7800 XT — see
+*3D curl-noise velocity field sampled per-particle in a compute shader,
+plus a spherical attracting force pulling particles into an orbiting
+shell — see [ADR-driven devlog: curl noise & mouse-look](docs/devlog/2026-09-15-curl-noise-and-mouse-look.md).*
+
+https://github.com/user-attachments/assets/9054c211-3107-40f7-b6f8-0e4786592c00
+
+*M1 bloom: left without, right with, same camera and emitter. Only HDR
+values above the soft-knee threshold feed the mip chain, so the particle
+cloud glows onto the dark room while the room itself adds nothing. 25 µs
+at 720p on an RX 7800 XT — see
 [devlog: M1 bloom](docs/devlog/2026-11-10-m1-bloom.md).*
 
 ## Building
