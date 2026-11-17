@@ -47,9 +47,9 @@ jobs:
       - name: Run C++ tests
         shell: pwsh
         run: |
-          & "build/${{ matrix.configuration }}/PatronusFrameTimingLogTest.exe"
+          & "build/${{ matrix.configuration }}/PatronusFrameTimingWriterTest.exe"
           if ($LASTEXITCODE -ne 0) {
-            throw "FrameTimingLog test exited with code $LASTEXITCODE"
+            throw "FrameTimingWriter test exited with code $LASTEXITCODE"
           }
 
   tools-check:

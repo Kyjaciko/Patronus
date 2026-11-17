@@ -17,3 +17,14 @@ src/core/*
 src/platform/input/*
 tests/profiling/*
 src/profiling/*
+
+# Temporary, 2026-11-17: hand-written files that are not clang-format clean
+# yet. Listed per file (not src/renderer/*) so new files there are still
+# checked. A '*' does not match '/', so src/core/* above never covered the
+# particle_system/ subfolder.
+src/core/particle_system/*
+src/renderer/DisplayOutput.cpp
+src/renderer/DisplayOutput.h
+src/renderer/GraphicsAdapterManager.cpp
+src/renderer/GraphicsAdapterManager.h
+src/renderer/Settings.h
